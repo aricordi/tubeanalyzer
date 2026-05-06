@@ -4,7 +4,15 @@
   'use strict';
 
   const YT_BASE  = 'https://www.googleapis.com/youtube/v3';
-  const GM_BASE  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+  const GM_MODELS = [
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-latest',
+  ];
+  let _gmModelIdx = 0;
+  function gmBase() {
+    return `https://generativelanguage.googleapis.com/v1beta/models/${GM_MODELS[_gmModelIdx]}:generateContent`;
+  }
 
   // ─── Cache (localStorage with TTL) ────────────────────────────────────────
   const CACHE_1H  = 60 * 60 * 1000;
@@ -334,16 +342,27 @@
       generationConfig: { temperature, maxOutputTokens: maxTokens },
     };
     if (json) body.generationConfig.responseMimeType = 'application/json';
-    const res = await fetch(`${GM_BASE}?key=${Keys.gemini}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
+    let res, lastErr;
+    for (let attempt = 0; attempt < GM_MODELS.length; attempt++) {
+      res = await fetch(`${gmBase()}?key=${Keys.gemini}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) break;
       const err = await res.json().catch(() => ({}));
-      const msg = err.error?.message || `HTTP ${res.status}`;
-      if (res.status === 400) throw Object.assign(new Error(msg), { code: 'BAD_KEY' });
-      if (res.status === 429) throw Object.assign(new Error(msg), { code: 'QUOTA' });
+      lastErr = err;
+      if (res.status === 404 || (res.status === 400 && err.error?.message?.includes('not found'))) {
+        // model not available, try next
+        _gmModelIdx = Math.min(_gmModelIdx + 1, GM_MODELS.length - 1);
+        continue;
+      }
+      if (res.status === 400) throw Object.assign(new Error(err.error?.message || `HTTP 400`), { code: 'BAD_KEY' });
+      if (res.status === 429) throw Object.assign(new Error(err.error?.message || `HTTP 429`), { code: 'QUOTA' });
+      throw Object.assign(new Error(err.error?.message || `HTTP ${res.status}`), { code: 'AI_ERR' });
+    }
+    if (!res.ok) {
+      const msg = lastErr?.error?.message || `HTTP ${res.status}`;
       throw Object.assign(new Error(msg), { code: 'AI_ERR' });
     }
     const data = await res.json();
