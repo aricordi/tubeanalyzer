@@ -69,12 +69,25 @@ function HomePage({ filters, setFilters, search, onOpenVideo, onOpenChannel, boo
   const debouncedSearch = useDebounce(search, 600);
 
   const doFetch = useCallback((q) => {
-    if (!window.TubeAPI?.Keys?.hasYt()) return;
+    if (!window.TubeAPI?.Keys?.hasYt()) {
+      console.log('[TubeAnalyzer] doFetch skipped — no YouTube API key set');
+      return;
+    }
     const id = ++fetchRef.current;
+    const query = q || 'youtube viral tutorial';
+    console.log('[TubeAnalyzer] Fetching:', query);
     setLoading(true); setApiError('');
-    window.TubeAPI.fetchOutlierFeed(q || 'youtube viral tutorial', { maxResults: 50 })
-      .then(videos => { if (fetchRef.current === id) { setApiVideos(videos); setLoading(false); } })
-      .catch(err => { if (fetchRef.current === id) { setApiError(err.message); setLoading(false); } });
+    window.TubeAPI.fetchOutlierFeed(query, { maxResults: 50 })
+      .then(videos => {
+        if (fetchRef.current !== id) return;
+        console.log('[TubeAnalyzer] Got', videos?.length || 0, 'videos for:', query);
+        setApiVideos(videos); setLoading(false);
+      })
+      .catch(err => {
+        if (fetchRef.current !== id) return;
+        console.error('[TubeAnalyzer] Fetch failed:', err);
+        setApiError(err.message); setLoading(false);
+      });
   }, []);
 
   useEffect(() => {

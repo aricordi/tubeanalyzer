@@ -8,22 +8,33 @@
   const YT_BASE        = 'https://www.googleapis.com/youtube/v3';
 
   // ─── Token state (in-memory only) ─────────────────────────────────────────
-  let _accessToken = null;
-  let _tokenExpiry = 0;
-  let _tokenClient = null;
+  let _accessToken    = null;
+  let _tokenExpiry    = 0;
+  let _grantedScopes  = '';
+
+  const SCOPES = [
+    'https://www.googleapis.com/auth/yt-analytics.readonly',
+    'https://www.googleapis.com/auth/youtube.readonly',
+  ];
 
   // ─── Auth object ───────────────────────────────────────────────────────────
   const AnalyticsAuth = {
     get clientId()    { return localStorage.getItem('ta_oauth_client_id') || ''; },
-    setClientId(v)    { localStorage.setItem('ta_oauth_client_id', v.trim()); _tokenClient = null; },
+    setClientId(v)    { localStorage.setItem('ta_oauth_client_id', v.trim()); },
 
     get accessToken() { return _accessToken; },
-    get isConnected() { return !!(this.accessToken && Date.now() < _tokenExpiry); },
+    get grantedScopes(){ return _grantedScopes; },
+    get isConnected() { return !!(_accessToken && Date.now() < _tokenExpiry); },
 
-    connect() {
+    /**
+     * Connect via GIS popup. Always creates a fresh token client to avoid
+     * stale callback closures. Uses prompt='consent' to force scope grants.
+     * Returns { token, scope, expires_in } on success.
+     */
+    connect({ forceConsent = true } = {}) {
       return new Promise((resolve, reject) => {
         if (!window.google?.accounts?.oauth2) {
-          reject(Object.assign(new Error('Google Identity Services not loaded yet. Wait a moment and try again.'), { code: 'GIS_NOT_READY' }));
+          reject(Object.assign(new Error('Google Identity Services not loaded. Refresh the page and try again.'), { code: 'GIS_NOT_READY' }));
           return;
         }
         const clientId = this.clientId;
@@ -31,43 +42,84 @@
           reject(Object.assign(new Error('No OAuth Client ID configured.'), { code: 'NO_CLIENT_ID' }));
           return;
         }
-
-        // Re-create client if clientId changed
-        if (!_tokenClient) {
-          _tokenClient = window.google.accounts.oauth2.initTokenClient({
-            client_id: clientId,
-            scope: [
-              'https://www.googleapis.com/auth/yt-analytics.readonly',
-              'https://www.googleapis.com/auth/youtube.readonly',
-            ].join(' '),
-            callback: (response) => {
-              if (response.error) {
-                reject(Object.assign(new Error(response.error_description || response.error), { code: 'OAUTH_ERR' }));
-                return;
-              }
-              _accessToken = response.access_token;
-              _tokenExpiry = Date.now() + (+response.expires_in * 1000);
-              resolve(response.access_token);
-            },
-            error_callback: (err) => {
-              reject(Object.assign(new Error(err.message || 'OAuth flow failed'), { code: 'OAUTH_ERR' }));
-            },
-          });
+        if (!clientId.endsWith('.apps.googleusercontent.com')) {
+          reject(Object.assign(new Error('Client ID looks malformed — should end in .apps.googleusercontent.com'), { code: 'BAD_CLIENT_ID' }));
+          return;
         }
 
-        // prompt: '' means no prompt if already authorized; 'consent' forces re-consent
-        _tokenClient.requestAccessToken({ prompt: '' });
+        // Fresh client each call: GIS callbacks close over resolve/reject,
+        // so a cached client would call the previous Promise's handlers.
+        const client = window.google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: SCOPES.join(' '),
+          callback: (response) => {
+            if (response.error) {
+              reject(Object.assign(
+                new Error(response.error_description || response.error),
+                { code: 'OAUTH_ERR', detail: response }
+              ));
+              return;
+            }
+            if (!response.access_token) {
+              reject(Object.assign(new Error('Authorization succeeded but no access token was returned.'), { code: 'OAUTH_ERR' }));
+              return;
+            }
+            _accessToken   = response.access_token;
+            _tokenExpiry   = Date.now() + (Number(response.expires_in || 3600) * 1000);
+            _grantedScopes = response.scope || '';
+            resolve({
+              token:      response.access_token,
+              scope:      response.scope || '',
+              expires_in: Number(response.expires_in || 0),
+            });
+          },
+          error_callback: (err) => {
+            reject(Object.assign(
+              new Error(err.message || err.type || 'OAuth flow failed (popup closed or blocked).'),
+              { code: 'OAUTH_ERR', detail: err }
+            ));
+          },
+        });
+
+        client.requestAccessToken({ prompt: forceConsent ? 'consent' : '' });
       });
     },
 
     disconnect() {
       if (_accessToken && window.google?.accounts?.oauth2) {
-        window.google.accounts.oauth2.revoke(_accessToken, () => {});
+        try { window.google.accounts.oauth2.revoke(_accessToken, () => {}); } catch {}
       }
-      _accessToken = null;
-      _tokenExpiry = 0;
+      _accessToken   = null;
+      _tokenExpiry   = 0;
+      _grantedScopes = '';
     },
   };
+
+  // ─── Token diagnostic — calls Google's tokeninfo endpoint ─────────────────
+  // Returns { ok, scopes, audience, expires_in, hasAnalyticsScope, hasYouTubeScope, reason? }
+  async function diagnoseToken() {
+    if (!_accessToken) return { ok: false, reason: 'No access token. Click Connect first.' };
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(_accessToken)}`
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { ok: false, reason: data.error_description || data.error || `tokeninfo HTTP ${res.status}`, raw: data };
+      }
+      const scopes = (data.scope || '').split(' ').filter(Boolean);
+      return {
+        ok: true,
+        scopes,
+        audience:           data.aud || data.azp,
+        expires_in:         Number(data.expires_in || 0),
+        hasAnalyticsScope:  scopes.includes('https://www.googleapis.com/auth/yt-analytics.readonly'),
+        hasYouTubeScope:    scopes.includes('https://www.googleapis.com/auth/youtube.readonly'),
+      };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  }
 
   // ─── Analytics fetch helper ────────────────────────────────────────────────
   async function analyticsRequest(params) {
@@ -82,11 +134,16 @@
       headers: { Authorization: `Bearer ${AnalyticsAuth.accessToken}` },
     });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      const msg  = body.error?.message || `HTTP ${res.status}`;
-      if (res.status === 401) throw Object.assign(new Error('Session expired — reconnect Analytics.'), { code: 'AUTH_EXPIRED' });
-      if (res.status === 403) throw Object.assign(new Error(msg), { code: 'ANALYTICS_QUOTA' });
-      throw Object.assign(new Error(msg), { code: 'ANALYTICS_ERR' });
+      const body   = await res.json().catch(() => ({}));
+      const apiMsg = body.error?.message || `HTTP ${res.status}`;
+      const reason = body.error?.errors?.[0]?.reason || '';
+      if (res.status === 401) {
+        throw Object.assign(new Error(apiMsg), { code: 'AUTH_EXPIRED', apiMsg, reason, status: 401 });
+      }
+      if (res.status === 403) {
+        throw Object.assign(new Error(apiMsg), { code: 'ANALYTICS_QUOTA', apiMsg, reason, status: 403 });
+      }
+      throw Object.assign(new Error(apiMsg), { code: 'ANALYTICS_ERR', apiMsg, reason, status: res.status });
     }
     return res.json();
   }
@@ -285,6 +342,7 @@
   // ─── Expose ────────────────────────────────────────────────────────────────
   window.TubeAnalytics = {
     AnalyticsAuth,
+    diagnoseToken,
     getMyChannel,
     getChannelOverview,
     getTopVideos,

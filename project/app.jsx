@@ -291,9 +291,11 @@ function App() {
     }
   }
 
-  // Refresh key status when returning to settings page
+  // Refresh key status on every route change so saving keys in Settings
+  // picks up immediately when navigating elsewhere (e.g. Home re-mounts
+  // via key prop and re-fetches real data).
   useEffect(() => {
-    if (route.page === "settings") refreshKeyStatus();
+    refreshKeyStatus();
   }, [route.page]);
 
   // ── Show setup page on first run ──

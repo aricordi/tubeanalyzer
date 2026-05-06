@@ -26,18 +26,38 @@
   }
 
   function analyticsError(e) {
-    const code = e?.code || '';
-    const msg  = (e?.message || String(e)).toLowerCase();
+    const code   = e?.code || '';
+    const reason = e?.reason || '';
+    const apiMsg = e?.apiMsg || e?.message || String(e);
+    const lower  = apiMsg.toLowerCase();
+
     if (code === 'NO_CLIENT_ID')       return 'No OAuth Client ID — enter your Client ID below.';
-    if (code === 'GIS_NOT_READY')      return 'Google sign-in is still loading. Wait a moment and try again.';
-    if (code === 'OAUTH_ERR')          return e.message || 'OAuth failed — check that your Client ID is "Web application" type and http://localhost:8765 is an authorized JavaScript origin.';
-    if (code === 'AUTH_EXPIRED')       return 'Analytics access expired — click Reconnect below.';
-    if (code === 'NOT_CONNECTED')      return 'Not connected to YouTube Analytics.';
-    if (code === 'ANALYTICS_ERR')      return `Analytics API error: ${e.message} — make sure "YouTube Analytics API" is enabled in your Google Cloud project.`;
-    if (code === 'ANALYTICS_QUOTA')    return `Access denied: ${e.message} — check that your Google account owns a YouTube channel, and YouTube Analytics API is enabled.`;
-    if (msg.includes('popup'))         return 'Pop-up blocked — allow pop-ups for localhost:8765 in your browser, then retry.';
-    if (msg.includes('access_denied')) return 'Access denied — you may have cancelled, or this Google account has no YouTube channel.';
-    return e?.message || String(e);
+    if (code === 'BAD_CLIENT_ID')      return e.message;
+    if (code === 'GIS_NOT_READY')      return 'Google sign-in is still loading. Refresh the page and try again.';
+    if (code === 'OAUTH_ERR')          return `OAuth failed: ${apiMsg}. Verify your Client ID is "Web application" type and http://localhost:8765 is an authorized JavaScript origin.`;
+    if (code === 'NOT_CONNECTED')      return 'Not connected. Click Connect to authorize.';
+
+    // 401 / 403 / 4xx from analytics API — surface the real message
+    if (code === 'AUTH_EXPIRED' || code === 'ANALYTICS_QUOTA' || code === 'ANALYTICS_ERR') {
+      // Check for known specific causes
+      if (lower.includes('api has not been used') || lower.includes('api is not enabled') || reason === 'accessNotConfigured') {
+        return `YouTube Analytics API is not enabled in your Google Cloud project. Go to console.cloud.google.com → APIs & Services → Library → search "YouTube Analytics API" → Enable. (Full message: ${apiMsg})`;
+      }
+      if (lower.includes('forbidden') || lower.includes('does not have permission') || reason === 'forbidden') {
+        return `Access denied. Most common cause: your Google account doesn't own a YouTube channel that has data, OR the channel hasn't generated views yet. (${apiMsg})`;
+      }
+      if (lower.includes('insufficient') || lower.includes('scope')) {
+        return `Insufficient OAuth scope. Try clicking Reconnect and grant the YouTube Analytics permission. (${apiMsg})`;
+      }
+      if (code === 'AUTH_EXPIRED') {
+        return `Authorization rejected (HTTP 401): "${apiMsg}". This usually means: 1) the OAuth Client ID's project doesn't match where YouTube Analytics API is enabled, OR 2) the Client ID type isn't "Web application". Click Reconnect to retry.`;
+      }
+      return `Analytics API error: ${apiMsg}`;
+    }
+
+    if (lower.includes('popup'))         return 'Pop-up blocked — allow pop-ups for localhost:8765, then retry.';
+    if (lower.includes('access_denied')) return 'Access denied — you cancelled, or this Google account has no YouTube channel.';
+    return apiMsg;
   }
 
   // ─── Tiny SVG line chart ───────────────────────────────────────────────────
@@ -135,6 +155,19 @@
       try {
         if (clientId) window.TubeAnalytics.AnalyticsAuth.setClientId(clientId);
         await window.TubeAnalytics.AnalyticsAuth.connect();
+
+        // Verify the token actually got the scopes we need before proceeding
+        const diag = await window.TubeAnalytics.diagnoseToken();
+        if (!diag.ok) {
+          setErr(`Token verification failed: ${diag.reason}. Check that your Client ID is correct and is "Web application" type.`);
+          window.TubeAnalytics.AnalyticsAuth.disconnect();
+          return;
+        }
+        if (!diag.hasAnalyticsScope) {
+          setErr(`Connected, but YouTube Analytics scope was NOT granted. Granted scopes: ${diag.scopes.join(', ') || '(none)'}. Click Connect again and make sure to check the YouTube Analytics permission.`);
+          window.TubeAnalytics.AnalyticsAuth.disconnect();
+          return;
+        }
         onConnected();
       } catch (e) {
         setErr(analyticsError(e));
@@ -512,6 +545,7 @@
     const loadData = useCallback(async (d) => {
       setLoading(true);
       setErr('');
+      console.log('[TubeAnalyzer] Loading analytics data for', d, 'days');
       try {
         // Core analytics — these are the real data calls
         const [ov, tv, tf, co] = await Promise.all([
@@ -520,6 +554,7 @@
           window.TubeAnalytics.getTrafficSources(d),
           window.TubeAnalytics.getTopCountries(d),
         ]);
+        console.log('[TubeAnalyzer] Analytics loaded:', { days: ov?.days?.length, totals: ov?.totals });
 
         setOverview(ov);
         setTraffic(tf);
@@ -547,8 +582,7 @@
           setTopVideos(tv);
         }
       } catch (e) {
-        // AUTH_EXPIRED from the analytics calls means token is genuinely dead
-        // Show reconnect button but don't auto-disconnect (let user decide)
+        console.error('[TubeAnalyzer] Analytics load failed:', e, 'apiMsg:', e?.apiMsg, 'reason:', e?.reason, 'status:', e?.status);
         setErr(analyticsError(e));
       } finally {
         setLoading(false);
