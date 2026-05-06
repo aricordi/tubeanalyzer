@@ -54,6 +54,7 @@ function VideoSkeletons({ count = 12 }) {
     </div>
   );
 }
+window.VideoSkeletons = VideoSkeletons;
 
 /* ======================= HOME ======================= */
 function HomePage({ filters, setFilters, search, onOpenVideo, onOpenChannel, bookmarks, toggleBookmark, niches, myChannel, trackers, onGoToSettings }) {
@@ -197,11 +198,28 @@ function TrackersPage({ trackers, setTrackers, activeTracker, setActiveTracker, 
       </div>
       <div className="tracker-list">
         <div className="tracker-side">
-          {trackers.map(t => (
+          {trackers.map(t => {
+            // Show stacked avatars of first 3 channels in this tracker
+            const previews = (t.channels || []).slice(0, 3).map(id => {
+              const meta = window.CHANNELS.find(c => c.handle === id) || (t.channelMeta || {})[id];
+              return { id, src: meta?.thumbnail || meta?.channelAvatar, handle: meta?.handle || id };
+            });
+            return (
             <div key={t.id} className={classNames("tracker-row", t.id === activeTracker && "active")} onClick={() => setActiveTracker(t.id)}>
-              <div style={{ width: 34, height: 34, borderRadius: 8, background: "var(--bg-3)", display: "grid", placeItems: "center", color: "var(--accent)" }}>
-                <Icons.Folder size={16}/>
-              </div>
+              {previews.length > 0 ? (
+                <div style={{ width: 34, height: 34, position: "relative", flexShrink: 0 }}>
+                  {previews.map((p, i) => (
+                    <span key={p.id}
+                      style={{ position: "absolute", left: i * 9, top: i * 2, zIndex: 3 - i, border: "2px solid var(--bg-1)", borderRadius: "50%" }}>
+                      <Avatar handle={p.handle} src={p.src}/>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ width: 34, height: 34, borderRadius: 8, background: "var(--bg-3)", display: "grid", placeItems: "center", color: "var(--accent)", flexShrink: 0 }}>
+                  <Icons.Folder size={16}/>
+                </div>
+              )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="tracker-row-name" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
                 <div className="tracker-row-meta">{t.channels.length} channel{t.channels.length === 1 ? "" : "s"}</div>
@@ -210,7 +228,7 @@ function TrackersPage({ trackers, setTrackers, activeTracker, setActiveTracker, 
                 <Icons.Trash size={14}/>
               </button>
             </div>
-          ))}
+          );})}
           {creating ? (
             <div style={{ display: "flex", gap: 6, padding: 8 }}>
               <input autoFocus value={newTrackerName} onChange={e => setNewTrackerName(e.target.value)}
@@ -244,12 +262,24 @@ function TrackerDetail({ tracker, setTrackers, trackers, onOpenVideo, onOpenChan
   const [adding, setAdding] = useState(false);
   const [apiResults, setApiResults] = useState(null);
   const [searching, setSearching] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
   const [realVideos, setRealVideos] = useState(null);
   const [loadingVideos, setLoadingVideos] = useState(false);
 
-  const debouncedSearch = useDebounce(search, 450);
+  const debouncedSearch = useDebounce(search, 350);
 
-  // Channel search via YouTube API
+  // YouTube search-suggestions autocomplete (fast, free, runs on every keystroke)
+  useEffect(() => {
+    if (!adding || !search || search.length < 2) { setSuggestions([]); return; }
+    let active = true;
+    const timer = setTimeout(async () => {
+      const sugs = await (window.TubeAPI?.searchSuggestions?.(search) || Promise.resolve([]));
+      if (active) setSuggestions(sugs);
+    }, 150);
+    return () => { active = false; clearTimeout(timer); };
+  }, [search, adding]);
+
+  // Channel search via YouTube API (slower, costs quota)
   useEffect(() => {
     if (!adding || !debouncedSearch || !window.TubeAPI?.Keys?.hasYt()) {
       setApiResults(null); return;
@@ -369,6 +399,17 @@ function TrackerDetail({ tracker, setTrackers, trackers, onOpenVideo, onOpenChan
                 Showing sample channels. Add a YouTube API key in Settings to search any channel.
               </div>
             )}
+            {suggestions.length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {suggestions.slice(0, 6).map(s => (
+                  <button key={s} className="chip" onClick={() => setSearch(s)}
+                    style={{ fontSize: 12, padding: "4px 10px" }}>
+                    <Icons.Search size={11} style={{ color: "var(--fg-dim)", marginRight: 4 }}/>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
             <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
               {displayResults.map(c => {
                 const isReal = c.isReal === true;
@@ -377,12 +418,12 @@ function TrackerDetail({ tracker, setTrackers, trackers, onOpenVideo, onOpenChan
                   <button key={id} className="chan-card"
                     onClick={() => isReal ? addRealChannel(c) : addMockChannel(c.handle || id)}
                     style={{ flex: "unset", padding: 10 }}>
-                    <Avatar handle={c.handle || id}/>
+                    <Avatar handle={c.handle || id} src={c.thumbnail || c.channelAvatar} size="md"/>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        @{c.handle || c.name || id}
+                        {c.name || c.handle || id}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--fg-dim)" }}>{fmtNum(c.subs || 0)} · {c.niche || 'YouTube'}</div>
+                      <div style={{ fontSize: 11, color: "var(--fg-dim)" }}>{fmtNum(c.subs || 0)} subs · {c.niche || 'YouTube'}</div>
                     </div>
                     <div className="chan-card-add"><Icons.Plus size={14}/></div>
                   </button>
@@ -402,11 +443,11 @@ function TrackerDetail({ tracker, setTrackers, trackers, onOpenVideo, onOpenChan
             {tracker.channels.map(id => {
               const c = getChannelMeta(id);
               return (
-                <div key={id} className="chip" style={{ padding: "6px 6px 6px 8px", gap: 8 }}>
+                <div key={id} className="chip" style={{ padding: "4px 6px 4px 4px", gap: 8 }}>
                   <span onClick={() => onOpenChannel(id)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                    <Avatar handle={c.handle || id}/>
-                    <span>@{c.handle || id}</span>
-                    <span style={{ color: "var(--fg-dim)" }}>{fmtNum(c.subs || 0)}</span>
+                    <Avatar handle={c.handle || id} src={c.thumbnail || c.channelAvatar}/>
+                    <span style={{ fontWeight: 600 }}>{c.name || c.handle || id}</span>
+                    <span style={{ color: "var(--fg-dim)", fontSize: 11 }}>{fmtNum(c.subs || 0)}</span>
                   </span>
                   <button onClick={() => removeChannel(id)} style={{ padding: 4, color: "var(--fg-dim)" }}><Icons.X size={12}/></button>
                 </div>

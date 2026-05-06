@@ -220,12 +220,14 @@
   }
 
   // ─── Build internal video object from API data ─────────────────────────────
-  function buildVideo(searchItem, detailItem, channelAvgViews = 50000, niche = '') {
+  function buildVideo(searchItem, detailItem, channelAvgViews = 50000, niche = '', channelSnippet = null) {
     const sn = searchItem.snippet || detailItem?.snippet || {};
     const st = detailItem?.statistics || {};
     const cd = detailItem?.contentDetails || {};
     const videoId = searchItem.id?.videoId || detailItem?.id || '';
     const chanId  = sn.channelId || '';
+    const channelAvatar = channelSnippet?.thumbnails?.medium?.url
+      || channelSnippet?.thumbnails?.default?.url || '';
     const views   = parseInt(st.viewCount || 0);
     const avgV    = channelAvgViews > 100 ? channelAvgViews : 50000;
     const dur     = parseDuration(cd.duration);
@@ -252,6 +254,7 @@
       thumbStyle:  0,
       colors:      window.chanColor ? window.chanColor(chanId || videoId) : ['#3b82f6', '#1e3a8a'],
       thumbnail:   sn.thumbnails?.maxres?.url || sn.thumbnails?.high?.url || sn.thumbnails?.medium?.url || '',
+      channelAvatar,
       isReal:      true,
     };
   }
@@ -310,7 +313,7 @@
       const niche = guessNiche(item.snippet?.title || '', item.snippet?.channelTitle || '');
       // For mostPopular endpoint, item itself has both id and detail fields
       const synthSearchItem = { id: { videoId: item.id }, snippet: item.snippet };
-      const v = buildVideo(synthSearchItem, item, avgViews, niche);
+      const v = buildVideo(synthSearchItem, item, avgViews, niche, ch?.snippet);
       v.subs        = subs;
       v.channel     = ch?.snippet?.customUrl?.replace('@', '') || item.snippet?.channelTitle?.replace(/\s+/g, '') || chanId;
       v.channelName = ch?.snippet?.title || item.snippet?.channelTitle || 'Unknown';
@@ -348,7 +351,7 @@
       const vidCnt  = parseInt(ch?.statistics?.videoCount || 1);
       const avgViews = vidCnt > 0 ? Math.round(totV / vidCnt) : Math.max(1000, Math.round(subs * 0.05));
       const niche   = guessNiche(item.snippet?.title || '', item.snippet?.channelTitle || '');
-      const v       = buildVideo(item, detail, avgViews, niche);
+      const v       = buildVideo(item, detail, avgViews, niche, ch?.snippet);
       v.subs        = subs;
       v.channel     = ch?.snippet?.customUrl?.replace('@', '') || item.snippet?.channelTitle?.replace(/\s+/g, '') || chanId;
       v.channelName = ch?.snippet?.title || item.snippet?.channelTitle || 'Unknown';
@@ -377,7 +380,7 @@
 
     const niche = guessNiche(ch.snippet?.title || '', ch.snippet?.description || '');
     const videos = items.map(item => {
-      const v  = buildVideo(item, detailMap[item.id?.videoId], avgViews, niche);
+      const v  = buildVideo(item, detailMap[item.id?.videoId], avgViews, niche, ch.snippet);
       v.subs   = subs;
       v.channelName = ch.snippet?.title || 'Unknown';
       v.channel = ch.snippet?.customUrl?.replace('@', '') || ch.snippet?.title?.replace(/\s+/g, '') || channelId;

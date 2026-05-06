@@ -6,17 +6,19 @@ function VideoCard({ video, onOpen, onOpenChannel, bookmarked, onBookmark }) {
     <div className="card" onClick={()=>onOpen(video)}>
       <div className="card-thumb">
         <Thumb video={video}/>
-        <div className="card-outlier"><Outlier m={video.multiplier}/></div>
         <button className="card-bookmark" onClick={(e)=>{e.stopPropagation(); onBookmark(video.id);}}>
           <Icons.Bookmark size={14} fill={bookmarked?"currentColor":"none"}/>
         </button>
         <div className="card-duration mono">{video.length}</div>
       </div>
       <div className="card-body">
-        <h3 className="card-title">{video.title}</h3>
+        <div className="card-title-row">
+          <span className="card-mult-pill"><Outlier m={video.multiplier}/></span>
+          <h3 className="card-title">{video.title}</h3>
+        </div>
         <div className="card-meta" onClick={(e)=>{e.stopPropagation(); onOpenChannel(video.channel);}}>
-          <Avatar handle={video.channel}/>
-          <span style={{cursor:"pointer"}}>@{video.channel}</span>
+          <Avatar handle={video.channel} src={video.channelAvatar}/>
+          <span style={{cursor:"pointer", fontWeight: 500}}>@{video.channel}</span>
           <span style={{color:"var(--fg-dim)"}}>·</span>
           <span>{fmtNum(video.subs)} subs</span>
         </div>

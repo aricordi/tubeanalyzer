@@ -67,11 +67,15 @@ window.Icons = {
   Compass: (p)=> <Icon {...p} d={<><circle cx="12" cy="12" r="9"/><path d="m9 15 2-6 6-2-2 6z"/></>}/>,
 };
 
-// Avatar — initials + gradient by handle
-function Avatar({ handle, size }) {
+// Avatar — real channel pic via `src`, fallback to initials + gradient
+function Avatar({ handle, size, src }) {
+  const cls = size==="xl" ? "avatar avatar-xl" : size==="lg" ? "avatar avatar-lg" : size==="md" ? "avatar avatar-md" : "avatar";
+  if (src) {
+    return <img className={cls} src={src} alt="" referrerPolicy="no-referrer"
+      onError={e => { e.target.style.display = 'none'; }}/>;
+  }
   const colors = (window.CHANNELS.find(c=>c.handle===handle)?.colors) || ["#5b8cff","#1e3a8a"];
-  const initials = handle.replace(/[^A-Za-z]/g,"").slice(0,2).toUpperCase();
-  const cls = size==="xl" ? "avatar avatar-xl" : size==="lg" ? "avatar avatar-lg" : "avatar";
+  const initials = (handle || '?').replace(/[^A-Za-z0-9]/g,"").slice(0,2).toUpperCase();
   return (
     <div className={cls} style={{ background: `linear-gradient(135deg, ${colors[0]}, ${colors[1]})` }}>
       {initials}

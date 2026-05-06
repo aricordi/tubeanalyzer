@@ -1,6 +1,6 @@
 // Video deep-dive, Trending Formats, Thumbnail Winners, Generators, Bookmarks
-const { Avatar, Outlier, Thumb, Icons, Sparkline, fmtNum, classNames, VideoGrid, Spinner } = window;
-const { useState, useEffect, useMemo } = React;
+const { Avatar, Outlier, Thumb, Icons, Sparkline, fmtNum, classNames, VideoGrid, VideoSkeletons, Spinner } = window;
+const { useState, useEffect, useMemo, useRef } = React;
 
 /* ── helpers ── */
 function scoreHash(v, k) {
@@ -253,9 +253,42 @@ function TrendingFormatsPage({ onOpenVideo, onOpenChannel, bookmarks, toggleBook
   const recommended = useMemo(()=> formatsWithFit.slice().sort((a,b)=>b.fit-a.fit).slice(0,3), [formatsWithFit]);
 
   const fmt = window.TRENDING_FORMATS.find(f=>f.id===activeFmt);
+
+  // Fetch real YouTube videos matching the selected format's name as a search query
+  const [apiMatching, setApiMatching] = useState(null);
+  const [matchingLoading, setMatchingLoading] = useState(false);
+  const [matchingErr, setMatchingErr] = useState('');
+  const matchingFetchRef = useRef(0);
+
+  useEffect(() => {
+    if (!window.TubeAPI?.Keys?.hasYt() || !fmt) {
+      setApiMatching(null);
+      return;
+    }
+    const fetchId = ++matchingFetchRef.current;
+    setMatchingLoading(true);
+    setMatchingErr('');
+    // Strip placeholder parts in brackets/parens for a cleaner search query
+    const query = fmt.name.replace(/\[.*?\]|\(.*?\)/g, '').trim();
+    window.TubeAPI.fetchOutlierFeed(query, { maxResults: 20 })
+      .then(videos => {
+        if (matchingFetchRef.current !== fetchId) return;
+        setApiMatching(videos);
+        setMatchingLoading(false);
+      })
+      .catch(err => {
+        if (matchingFetchRef.current !== fetchId) return;
+        setMatchingErr(err.message);
+        setMatchingLoading(false);
+      });
+  }, [activeFmt, fmt]);
+
   const matching = useMemo(()=>{
+    if (apiMatching && apiMatching.length) {
+      return apiMatching.slice().sort((a,b)=>b.multiplier-a.multiplier).slice(0,12);
+    }
     return window.VIDEOS.filter(v=> fmt.niches.includes(v.niche)).sort((a,b)=>b.multiplier-a.multiplier).slice(0,8);
-  }, [activeFmt]);
+  }, [apiMatching, activeFmt]);
 
   function fitColor(s) {
     if (s>=70) return "var(--accent)";
@@ -351,10 +384,24 @@ function TrendingFormatsPage({ onOpenVideo, onOpenChannel, bookmarks, toggleBook
       </div>
 
       <div className="section-head">
-        <div className="section-title">Top videos using "{fmt.name}"</div>
-        <div className="section-link mono">{matching.length} examples</div>
+        <div className="section-title">
+          Top videos using "{fmt.name}"
+          {apiMatching && !matchingLoading && (
+            <span style={{ color: 'var(--accent)', marginLeft: 8, fontSize: 11 }}>● LIVE</span>
+          )}
+        </div>
+        <div className="section-link mono">
+          {matchingLoading ? 'fetching from YouTube…' : `${matching.length} examples`}
+        </div>
       </div>
-      <VideoGrid videos={matching} onOpen={onOpenVideo} onOpenChannel={onOpenChannel} bookmarks={bookmarks} onBookmark={toggleBookmark}/>
+      {matchingErr && (
+        <div style={{ background: 'var(--hot-3)22', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: 'var(--hot-3)' }}>
+          ⚠ YouTube API: {matchingErr} — showing sample data instead.
+        </div>
+      )}
+      {matchingLoading && !apiMatching ? <VideoSkeletons count={6}/> :
+        <VideoGrid videos={matching} onOpen={onOpenVideo} onOpenChannel={onOpenChannel} bookmarks={bookmarks} onBookmark={toggleBookmark}/>
+      }
     </div>
   );
 }
