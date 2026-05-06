@@ -224,7 +224,7 @@ function App() {
       const last = h[h.length - 1]; setRoute(last); return h.slice(0, -1);
     });
   }
-  function navRoot(page) { setHistory([]); setRoute({ page }); }
+  function navRoot({ page }) { setHistory([]); setRoute({ page }); }
 
   // ── Filters ──
   const [filters, setFilters] = useState({
