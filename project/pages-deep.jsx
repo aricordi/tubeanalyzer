@@ -1,143 +1,218 @@
 // Video deep-dive, Trending Formats, Thumbnail Winners, Generators, Bookmarks
-const { Avatar, Outlier, Thumb, Icons, Sparkline, fmtNum, classNames, VideoGrid } = window;
+const { Avatar, Outlier, Thumb, Icons, Sparkline, fmtNum, classNames, VideoGrid, Spinner } = window;
+const { useState, useEffect, useMemo } = React;
+
+/* ── helpers ── */
+function scoreHash(v, k) {
+  let h = 0;
+  const id = v.id || '';
+  for (let i = 0; i < id.length; i++) h = (h * 23 + id.charCodeAt(i)) | 0;
+  h = (h + (k.charCodeAt(0) || 0) * 7) | 0;
+  return 50 + Math.abs(h) % 50;
+}
 
 /* ======================= VIDEO DEEP DIVE ======================= */
 function VideoPage({ video, onBack, onOpenChannel, onOpenVideo, bookmarks, toggleBookmark }) {
   const [variant, setVariant] = useState(0);
-  const variants = [video, ...window.VIDEOS.filter(v=>v.channel===video.channel && v.id!==video.id).slice(0,2)];
+  const variants = [video, ...window.VIDEOS.filter(v => v.channel === video.channel && v.id !== video.id).slice(0, 2)];
   const cur = variants[variant];
 
-  function scoreFor(v, k) {
-    let h=0; for (let i=0;i<v.id.length;i++) h=(h*23+v.id.charCodeAt(i))|0;
-    h = (h + k.charCodeAt(0)*7)|0;
-    return 50 + Math.abs(h)%50;
-  }
-  const scores = [
-    { label: "Face / emotion", val: scoreFor(cur, "f") },
-    { label: "Color contrast", val: scoreFor(cur, "c") },
-    { label: "Hook clarity",   val: scoreFor(cur, "h") },
-    { label: "Curiosity gap",  val: scoreFor(cur, "k") },
-    { label: "Title sync",     val: scoreFor(cur, "t") },
-    { label: "Mobile legibility", val: scoreFor(cur, "m") },
-  ];
-  const avgScore = Math.round(scores.reduce((a,s)=>a+s.val,0)/scores.length);
+  // AI analysis state
+  const [analysis, setAnalysis] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisErr, setAnalysisErr] = useState('');
 
-  const annotations = [
-    { x: 18, y: 22, label: "Big yellow text creates focal point", side:"r" },
-    { x: 78, y: 70, label: "Reaction circle anchors emotion", side:"l" },
-    { x: 50, y: 55, label: "Negative space draws eye through", side:"r" },
+  useEffect(() => {
+    setAnalysis(null); setAnalysisErr('');
+    if (!window.TubeAPI?.Keys?.hasGemini()) return;
+    let active = true;
+    setAnalyzing(true);
+    window.TubeAPI.analyzeThumb({
+      title: cur.title,
+      niche: cur.niche,
+      thumbUrl: cur.thumbnail || '',
+      channelName: cur.channelName || cur.channel,
+    }).then(r => {
+      if (active) { setAnalysis(r); setAnalyzing(false); }
+    }).catch(e => {
+      if (active) { setAnalysisErr(e.message); setAnalyzing(false); }
+    });
+    return () => { active = false; };
+  }, [cur.id]);
+
+  // Score rows — real or fallback
+  const scoreKeys = [
+    ['face_emotion', 'Face / emotion'],
+    ['color_contrast', 'Color contrast'],
+    ['hook_clarity', 'Hook clarity'],
+    ['curiosity_gap', 'Curiosity gap'],
+    ['title_sync', 'Title sync'],
+    ['mobile_legibility', 'Mobile legibility'],
   ];
-  const insights = [
-    { kind: "Why it works", color: "var(--accent)", body: `Aggressive yellow tag + face‑forward composition typical of high‑performing ${cur.niche} videos. Title and image agree on the curiosity gap.` },
-    { kind: "Risk", color: "var(--hot-4)", body: `Mobile crop hides ~22% of the right edge. Reaction circle survives but the secondary character is clipped on small thumbnails.` },
-    { kind: "Try next", color: "var(--accent)", body: `Swap the all‑caps tag for a single number ("3AM") to test whether time‑based curiosity outperforms imperative hooks.` },
+  const scores = scoreKeys.map(([key, label]) => ({
+    label,
+    val: analysis?.scores?.[key] ?? scoreHash(cur, key[0]),
+  }));
+  const avgScore = analysis?.overall ?? Math.round(scores.reduce((a, s) => a + s.val, 0) / scores.length);
+
+  // Annotations — real or fallback
+  const annotations = analysis?.annotations || [
+    { x: 18, y: 22, label: 'Big yellow text creates focal point', side: 'r' },
+    { x: 78, y: 70, label: 'Reaction circle anchors emotion', side: 'l' },
+    { x: 50, y: 55, label: 'Negative space draws eye through', side: 'r' },
   ];
-  const titleVariants = [
-    cur.title,
-    `I Tried ${cur.title.split(" ").slice(0,4).join(" ")} for 30 Days`,
-    `The Truth About ${cur.title.split(" ").slice(-3).join(" ")}`,
-  ];
-  const comparable = useMemo(()=> window.VIDEOS.filter(v=>v.format===cur.format && v.id!==cur.id).slice(0,4), [cur]);
+
+  // Insights — real or fallback
+  const insights = analysis
+    ? [
+        { kind: 'Why it works', color: 'var(--accent)', body: analysis.why_it_works },
+        { kind: 'Risk', color: 'var(--hot-4)', body: analysis.risk },
+        { kind: 'Try next', color: 'var(--accent)', body: analysis.try_next },
+      ].filter(i => i.body)
+    : [
+        { kind: 'Why it works', color: 'var(--accent)', body: `Aggressive composition typical of high-performing ${cur.niche} videos. Title and image agree on the curiosity gap.` },
+        { kind: 'Risk', color: 'var(--hot-4)', body: 'Mobile crop may hide edge elements. Check how it looks at thumbnail size on a phone.' },
+        { kind: 'Try next', color: 'var(--accent)', body: `Swap the text tag for a single number to test whether specificity outperforms imperative hooks in ${cur.niche}.` },
+      ];
+
+  // Title rewrites — real or fallback
+  const titleRewrites = analysis?.title_rewrites?.length
+    ? [{ title: cur.title, ctr_lift: 'original' }, ...analysis.title_rewrites.slice(0, 2)]
+    : [
+        { title: cur.title, ctr_lift: 'original' },
+        { title: `I Tried ${cur.title.split(' ').slice(0, 4).join(' ')} for 30 Days`, ctr_lift: '+18% predicted CTR' },
+        { title: `The Truth About ${cur.title.split(' ').slice(-3).join(' ')}`, ctr_lift: '+9% predicted CTR' },
+      ];
+
+  const comparable = useMemo(() => window.VIDEOS.filter(v => v.format === cur.format && v.id !== cur.id).slice(0, 4), [cur]);
 
   return (
     <div className="page">
-      <button className="btn btn-ghost" onClick={onBack} style={{marginBottom: 18}}><Icons.Back size={14}/> Back</button>
+      <button className="btn btn-ghost" onClick={onBack} style={{ marginBottom: 18 }}><Icons.Back size={14}/> Back</button>
       <div className="deep-grid">
         <div>
           <div className="deep-thumb-card">
-            <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: 14}}>
-              <div style={{fontSize:12, color:"var(--fg-dim)", letterSpacing:".08em", textTransform:"uppercase"}}>Thumbnail · AI annotated</div>
-              <div style={{display:"flex", gap:6}}>
-                {variants.map((v,i)=>(
-                  <button key={v.id} onClick={()=>setVariant(i)}
-                    className={classNames("chip", i===variant && "chip-accent active")} style={{fontSize:11}}>
-                    {i===0?"This video":`Variant ${i+1}`}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontSize: 12, color: "var(--fg-dim)", letterSpacing: ".08em", textTransform: "uppercase" }}>Thumbnail · AI annotated</div>
+                {analyzing && <Spinner size={14}/>}
+                {analysis && !analyzing && <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>✦ Gemini</span>}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {variants.map((v, i) => (
+                  <button key={v.id} onClick={() => setVariant(i)}
+                    className={classNames("chip", i === variant && "chip-accent active")} style={{ fontSize: 11 }}>
+                    {i === 0 ? "This video" : `Variant ${i + 1}`}
                   </button>
                 ))}
               </div>
             </div>
             <div className="deep-thumb-frame">
               <Thumb video={cur}/>
-              {annotations.map((a,i)=>(
+              {annotations.map((a, i) => (
                 <React.Fragment key={i}>
                   <div className="thumb-marker" style={{ left: `calc(${a.x}% - 12px)`, top: `calc(${a.y}% - 12px)` }}></div>
                   <div className="thumb-anno" style={{
-                    left: a.side==="r" ? `calc(${a.x}% + 18px)` : "auto",
-                    right: a.side==="l" ? `calc(${100-a.x}% + 18px)` : "auto",
-                    top: `calc(${a.y}% - 10px)`, maxWidth: 220
+                    left: a.side === "r" ? `calc(${a.x}% + 18px)` : "auto",
+                    right: a.side === "l" ? `calc(${100 - a.x}% + 18px)` : "auto",
+                    top: `calc(${a.y}% - 10px)`, maxWidth: 220,
                   }}>{a.label}</div>
                 </React.Fragment>
               ))}
             </div>
-            <h1 style={{fontSize:22, fontWeight:700, margin:"18px 0 0", lineHeight:1.25, letterSpacing:"-.015em"}}>{cur.title}</h1>
-            <div style={{display:"flex", alignItems:"center", gap: 10, marginTop: 10, color:"var(--fg-mute)", fontSize:13}}>
+            <h1 style={{ fontSize: 22, fontWeight: 700, margin: "18px 0 0", lineHeight: 1.25, letterSpacing: "-.015em" }}>{cur.title}</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, color: "var(--fg-mute)", fontSize: 13 }}>
               <Avatar handle={cur.channel}/>
-              <span style={{cursor:"pointer"}} onClick={()=>onOpenChannel(cur.channel)}>@{cur.channel}</span>
-              <span>·</span><span>{fmtNum(cur.subs)} subs</span>
+              <span style={{ cursor: "pointer" }} onClick={() => onOpenChannel(cur.channelId || cur.channel)}>@{cur.channel}</span>
+              <span>·</span><span>{fmtNum(cur.subs || 0)} subs</span>
               <span>·</span><span>{cur.ago}</span>
               <span>·</span><span className="mono">{cur.length}</span>
             </div>
-            <div style={{display:"flex", gap:14, marginTop: 16, flexWrap:"wrap"}}>
+            <div style={{ display: "flex", gap: 14, marginTop: 16, flexWrap: "wrap" }}>
               <Outlier m={cur.multiplier} size="lg"/>
-              <div className="mono" style={{color:"var(--fg-mute)", fontSize:13, alignSelf:"center"}}>
+              <div className="mono" style={{ color: "var(--fg-mute)", fontSize: 13, alignSelf: "center" }}>
                 {fmtNum(cur.views)} views vs {fmtNum(cur.avgViews)} channel avg
               </div>
             </div>
           </div>
-          <div className="score-card" style={{marginTop: 22}}>
-            <div style={{display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom: 14}}>
+
+          <div className="score-card" style={{ marginTop: 22 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <div className="section-title">Title rewrites</div>
-              <button className="btn" style={{fontSize:12}}><Icons.Sparkle size={12}/> Generate more</button>
+              {analyzing && <Spinner size={14}/>}
             </div>
-            {titleVariants.map((t,i)=>(
-              <div key={i} className="gen-out" style={{display:"flex", alignItems:"center", gap:12}}>
-                <div style={{flex:1}}>{t}</div>
-                <div className="mono" style={{fontSize:11, color: i===0 ? "var(--fg-dim)" : "var(--accent)"}}>
-                  {i===0?"original":i===1?"+18% predicted CTR":"+9% predicted CTR"}
+            {titleRewrites.map((r, i) => (
+              <div key={i} className="gen-out" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ flex: 1 }}>{r.title}</div>
+                <div className="mono" style={{ fontSize: 11, color: i === 0 ? "var(--fg-dim)" : "var(--accent)" }}>
+                  {r.ctr_lift}
                 </div>
               </div>
             ))}
           </div>
         </div>
+
         <div>
           <div className="score-card">
-            <div style={{display:"flex", alignItems:"center", justifyContent:"space-between"}}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div className="section-title">AI thumbnail breakdown</div>
-              <div className="mono" style={{fontSize: 26, fontWeight: 700, color:"var(--accent)"}}>{avgScore}<span style={{fontSize:14, color:"var(--fg-mute)"}}>/100</span></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {analyzing && <Spinner size={16}/>}
+                <div className="mono" style={{ fontSize: 26, fontWeight: 700, color: "var(--accent)" }}>
+                  {avgScore}<span style={{ fontSize: 14, color: "var(--fg-mute)" }}>/100</span>
+                </div>
+              </div>
             </div>
-            <div style={{marginTop: 14}}>
-              {scores.map(s=>(
+            {!window.TubeAPI?.Keys?.hasGemini() && (
+              <div style={{ fontSize: 12, color: 'var(--fg-dim)', marginTop: 6 }}>
+                Add a Gemini API key in Settings for real AI analysis.
+              </div>
+            )}
+            {analysisErr && (
+              <div style={{ fontSize: 12, color: 'var(--hot-3)', marginTop: 6 }}>
+                AI error: {analysisErr}
+              </div>
+            )}
+            <div style={{ marginTop: 14 }}>
+              {scores.map(s => (
                 <div key={s.label} className="score-row">
-                  <div style={{flex: "0 0 160px", fontSize: 13, color:"var(--fg-mute)"}}>{s.label}</div>
-                  <div className="score-bar"><div style={{width: s.val+"%"}}></div></div>
+                  <div style={{ flex: "0 0 160px", fontSize: 13, color: "var(--fg-mute)" }}>{s.label}</div>
+                  <div className="score-bar"><div style={{ width: s.val + "%" }}></div></div>
                   <div className="score-val">{s.val}</div>
                 </div>
               ))}
             </div>
           </div>
-          <div className="score-card" style={{marginTop: 22}}>
-            <div className="section-title" style={{marginBottom: 8}}>Insights</div>
-            {insights.map((ins,i)=>(
-              <div key={i} style={{padding:"14px 0", borderBottom: i<insights.length-1?"1px dashed var(--line)":"0"}}>
-                <div className="mono" style={{fontSize:11, color: ins.color, textTransform:"uppercase", letterSpacing:".1em"}}>{ins.kind}</div>
-                <div style={{fontSize: 14, lineHeight: 1.5, marginTop: 4, color:"var(--fg)"}}>{ins.body}</div>
+
+          <div className="score-card" style={{ marginTop: 22 }}>
+            <div className="section-title" style={{ marginBottom: 8 }}>Insights</div>
+            {insights.map((ins, i) => (
+              <div key={i} style={{ padding: "14px 0", borderBottom: i < insights.length - 1 ? "1px dashed var(--line)" : "0" }}>
+                <div className="mono" style={{ fontSize: 11, color: ins.color, textTransform: "uppercase", letterSpacing: ".1em" }}>{ins.kind}</div>
+                <div style={{ fontSize: 14, lineHeight: 1.5, marginTop: 4, color: "var(--fg)" }}>{ins.body}</div>
               </div>
             ))}
           </div>
-          <div className="score-card" style={{marginTop: 22}}>
-            <div className="section-title" style={{marginBottom: 8}}>Detected format</div>
-            <div className="chip chip-accent active mono" style={{display:"inline-flex"}}>{cur.format}</div>
-            <div style={{fontSize:13, color:"var(--fg-mute)", marginTop: 12}}>
-              This format averages <strong style={{color:"var(--fg)"}}>2.4x</strong> across {comparable.length+12} other videos in {cur.niche}. Trending up over 30 days.
+
+          <div className="score-card" style={{ marginTop: 22 }}>
+            <div className="section-title" style={{ marginBottom: 8 }}>Detected format</div>
+            <div className="chip chip-accent active mono" style={{ display: "inline-flex" }}>{cur.format || 'YouTube video'}</div>
+            <div style={{ fontSize: 13, color: "var(--fg-mute)", marginTop: 12 }}>
+              This format averages <strong style={{ color: "var(--fg)" }}>2.4x</strong> across {comparable.length + 12} other videos in {cur.niche}. Trending up over 30 days.
             </div>
           </div>
         </div>
       </div>
-      <div className="section-head" style={{marginTop: 32}}>
-        <div className="section-title">Same format, ranked</div>
-        <div className="section-link mono">{comparable.length} compared</div>
-      </div>
-      <VideoGrid videos={comparable} onOpen={onOpenVideo} onOpenChannel={onOpenChannel} bookmarks={bookmarks} onBookmark={toggleBookmark}/>
+
+      {comparable.length > 0 && (
+        <>
+          <div className="section-head" style={{ marginTop: 32 }}>
+            <div className="section-title">Same format, ranked</div>
+            <div className="section-link mono">{comparable.length} compared</div>
+          </div>
+          <VideoGrid videos={comparable} onOpen={onOpenVideo} onOpenChannel={onOpenChannel} bookmarks={bookmarks} onBookmark={toggleBookmark}/>
+        </>
+      )}
     </div>
   );
 }
@@ -330,8 +405,14 @@ window.ThumbnailWinnersPage = ThumbnailWinnersPage;
 
 
 /* ======================= BOOKMARKS ======================= */
-function BookmarksPage({ bookmarks, toggleBookmark, onOpenVideo, onOpenChannel }) {
-  const videos = window.VIDEOS.filter(v => bookmarks.includes(v.id));
+function BookmarksPage({ bookmarks, toggleBookmark, onOpenVideo, onOpenChannel, videoCache }) {
+  const bookmarkSet = new Set(bookmarks);
+  const videos = useMemo(() => {
+    const fromMock  = window.VIDEOS.filter(v => bookmarkSet.has(v.id));
+    const fromCache = (videoCache || []).filter(v => bookmarkSet.has(v.id) && !fromMock.some(m => m.id === v.id));
+    return [...fromMock, ...fromCache];
+  }, [bookmarks, videoCache]);
+
   return (
     <div className="page">
       <div className="page-header">
@@ -339,6 +420,9 @@ function BookmarksPage({ bookmarks, toggleBookmark, onOpenVideo, onOpenChannel }
           <h1 className="page-title">Bookmarks</h1>
           <p className="page-sub">Your saved outliers, ready for the next deep dive.</p>
         </div>
+        {videos.length > 0 && (
+          <div className="chip mono">{videos.length} saved</div>
+        )}
       </div>
       {videos.length === 0 ? (
         <div className="empty">No bookmarks yet. Hover any video card and click the bookmark icon to save it here.</div>

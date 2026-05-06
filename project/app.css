@@ -297,6 +297,7 @@ input, textarea, select { font: inherit; color: inherit; }
 /* Discovery Lab */
 .crawl-spinner { width: 22px; height: 22px; border-radius: 50%; border: 2px solid color-mix(in oklch, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: crawl-spin 0.7s linear infinite; }
 @keyframes crawl-spin { to { transform: rotate(360deg); } }
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 .crawl-progress { margin-top: 12px; height: 3px; background: var(--bg-2); border-radius: 2px; overflow: hidden; }
 .crawl-progress > div { height: 100%; background: var(--accent); transition: width .4s ease; }
 

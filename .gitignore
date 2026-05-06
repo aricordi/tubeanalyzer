@@ -1,0 +1,10 @@
+project/uploads/
+TubeAnalyzer.zip
+TubeAnalyzer-clean.zip
+install.py
+install-p1.py
+install-p2.py
+install-p3.py
+chats/
+*.pyc
+__pycache__/

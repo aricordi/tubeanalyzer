@@ -1,5 +1,6 @@
 // Generators — Idea (infinite scroll + optional thumb visualizations) + Title + Thumbnail (image upload)
-const { Avatar, Icons, fmtNum, classNames } = window;
+const { Avatar, Icons, fmtNum, classNames, Spinner } = window;
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
 /* ============ FAKE THUMB RENDERER (for idea visualization) ============ */
 function ConceptThumb({ concept, idx }) {
@@ -64,6 +65,14 @@ function ConceptThumb({ concept, idx }) {
   );
 }
 window.ConceptThumb = ConceptThumb;
+
+/* ── AI badge ── */
+function AiBadge() {
+  if (!window.TubeAPI?.Keys?.hasGemini()) {
+    return <span className="chip mono" style={{fontSize:11}}>✦ Demo mode — <a href="#" style={{color:"var(--accent)"}}>add Gemini key</a> for real AI</span>;
+  }
+  return <span className="chip mono" style={{fontSize:11, color:"var(--accent)"}}>✦ Powered by Gemini AI</span>;
+}
 
 /* ============ TRAINING PANEL (shared) ============ */
 function TrainingPanel({ myChannel, setMyChannel, trackers, selectedTrackers, setSelectedTrackers, blend, setBlend, myVideos, competitorVideos, trackedChannels, myNiche }) {
@@ -136,68 +145,63 @@ function IdeaGeneratorPage({ myChannel, setMyChannel, trackers }) {
   const competitorVideos = useMemo(()=> window.VIDEOS.filter(v=>trackedChannels.includes(v.channel)), [trackedChannels]);
   const myVideos = useMemo(()=> window.VIDEOS.filter(v=>v.channel===myChannel), [myChannel]);
 
-  function generateBatch(s) {
+  function generateBatchLocal(s) {
     const t = topic || myNiche;
     const inNicheVids = competitorVideos.filter(v=>v.niche===myNiche);
     const outFormats = window.TRENDING_FORMATS.filter(f=>!f.niches.includes(myNiche));
     const adjVids = window.VIDEOS.filter(v=>v.niche!==myNiche).sort((a,b)=>b.multiplier-a.multiplier);
     const out = [];
-    const N = 12;
-    for (let i=0; i<N; i++) {
+    for (let i=0; i<12; i++) {
       const idx = s + i;
       const cross = Math.random()*100 < blend;
       let item;
       if (cross) {
         const f = outFormats[(idx*7)%Math.max(1,outFormats.length)];
         const ref = adjVids[(idx*3)%Math.max(1,adjVids.length)];
-        item = {
-          id: `i_${idx}`,
-          text: transplantTitle(f, myNiche, t),
-          tag: `borrowed from ${f?.niches[0] || "other niches"}`,
-          tagColor: "#facc15",
-          source: f ? `${f.growth} growth · inspired by @${ref?.channel}` : "cross-niche transfer",
-          score: 60 + (idx%30),
-        };
+        item = { id:`i_${idx}`, text:transplantTitle(f,myNiche,t), tag:`borrowed from ${f?.niches[0]||"other niches"}`, tagColor:"#facc15", source:f?`${f.growth} growth · inspired by @${ref?.channel}`:"cross-niche transfer", score:60+(idx%30) };
       } else {
         const ref = inNicheVids[(idx*5)%Math.max(1,inNicheVids.length)] || myVideos[idx%Math.max(1,myVideos.length)];
-        item = {
-          id: `i_${idx}`,
-          text: nativeIdea(t, myNiche, ref?.format || "ranked best to worst", idx),
-          tag: "from your niche",
-          tagColor: "var(--accent)",
-          source: ref ? `inspired by @${ref.channel} · ${ref.multiplier?.toFixed(1)||"1.0"}x` : `pattern from @${myChannel}`,
-          score: 70 + (idx%25),
-        };
+        item = { id:`i_${idx}`, text:nativeIdea(t,myNiche,ref?.format||"ranked best to worst",idx), tag:"from your niche", tagColor:"var(--accent)", source:ref?`inspired by @${ref.channel} · ${ref.multiplier?.toFixed(1)||"1.0"}x`:`pattern from @${myChannel}`, score:70+(idx%25) };
       }
       out.push(item);
     }
     return out;
   }
 
-  function reset() {
+  async function fetchIdeasFromAI() {
+    const result = await window.TubeAPI.generateIdeas({
+      niche: myNiche, topic, count: 12, blend,
+      myVideos, competitorVideos,
+    });
+    if (!result || !Array.isArray(result) || !result.length) return null;
+    return result.map((item, i) => ({ id: `ai_${Date.now()}_${i}`, ...item }));
+  }
+
+  async function reset() {
     setLoading(true);
-    setTimeout(()=>{
-      const fresh = generateBatch(0);
-      setItems(fresh);
-      setSeed(fresh.length);
-      setLoading(false);
-    }, 500);
+    if (window.TubeAPI?.Keys?.hasGemini()) {
+      try {
+        const aiItems = await fetchIdeasFromAI();
+        if (aiItems) { setItems(aiItems); setSeed(aiItems.length); setLoading(false); return; }
+      } catch (e) { /* fall through to local */ }
+    }
+    const fresh = generateBatchLocal(0);
+    setItems(fresh); setSeed(fresh.length); setLoading(false);
   }
 
   function loadMore() {
     setLoading(true);
-    setTimeout(()=>{
-      const more = generateBatch(seed);
+    // Always use local for "load more" (preserve quota)
+    setTimeout(() => {
+      const more = generateBatchLocal(seed);
       setItems(prev => [...prev, ...more]);
       setSeed(s => s + more.length);
       setLoading(false);
-    }, 400);
+    }, 300);
   }
 
   // Auto-load first batch
-  useEffect(()=>{
-    if (items.length === 0) reset();
-  }, []);
+  useEffect(()=>{ if (items.length === 0) reset(); }, []);
 
   // Infinite scroll sentinel
   const sentinelRef = useRef(null);
@@ -221,7 +225,7 @@ function IdeaGeneratorPage({ myChannel, setMyChannel, trackers }) {
           <h1 className="page-title">Idea generator</h1>
           <p className="page-sub">An endless feed of ideas, scored and tagged by source. Toggle thumbnails on for instant visualization.</p>
         </div>
-        <div className="chip mono">5 credits / 12 ideas</div>
+        <AiBadge/>
       </div>
 
       <TrainingPanel
@@ -328,35 +332,39 @@ function TitleGeneratorPage({ myChannel, setMyChannel, trackers }) {
   const competitorVideos = useMemo(()=> window.VIDEOS.filter(v=>trackedChannels.includes(v.channel)), [trackedChannels]);
   const myVideos = useMemo(()=> window.VIDEOS.filter(v=>v.channel===myChannel), [myChannel]);
 
-  function generate() {
+  async function generate() {
     setLoading(true);
-    setTimeout(()=>{
-      const t = topic || "your topic";
-      const samples = [];
-      const numItems = 8;
-      const numCross = Math.round((blend/100) * numItems);
-      const numNative = numItems - numCross;
-      const myTopTitles = myVideos.slice(0,3).map(v=>v.title);
-      const compTitles = competitorVideos.slice(0,3).map(v=>v.title);
-      const nativeTpl = [
-        `I Tried ${t} for 30 Days — Here's What Broke`,
-        `The Truth About ${t} (No One in ${myNiche} Will Tell You)`,
-        `Why Everyone in ${myNiche} Is Wrong About ${t}`,
-        `${t}: Ranked Worst to Best`,
-        `I Spent 100 Hours on ${t} So You Don't Have To`,
-      ];
-      const crossTpl = [
-        `${t} — But I Did It With $0 Budget`,
-        `I Lived ${t} for 7 Days (And It Almost Broke Me)`,
-        `The ${t} Method That's Killing It in 2026`,
-        `Nobody Talks About This ${t} Loophole`,
-        `The Hidden Side of ${t} They Don't Want You to See`,
-      ];
-      for (let i=0;i<numNative;i++) samples.push({ text: nativeTpl[i%nativeTpl.length], tag: "your-channel pattern", tagColor: "var(--accent)", source: `mirrors "${myTopTitles[i%Math.max(1,myTopTitles.length)]?.slice(0,40)||"your top video"}…"`, score: 72+(i%20) });
-      for (let i=0;i<numCross;i++) samples.push({ text: crossTpl[i%crossTpl.length], tag: "borrowed pattern", tagColor: "#facc15", source: `from "${compTitles[i%Math.max(1,compTitles.length)]?.slice(0,40)||"competitor"}…"`, score: 65+(i%25) });
-      setOut(samples);
-      setLoading(false);
-    }, 600);
+    // Try Gemini first
+    if (window.TubeAPI?.Keys?.hasGemini()) {
+      try {
+        const result = await window.TubeAPI.generateTitles({ niche: myNiche, topic, count: 8, blend, myVideos, competitorVideos });
+        if (result && Array.isArray(result) && result.length) { setOut(result); setLoading(false); return; }
+      } catch (e) { /* fall through */ }
+    }
+    // Local fallback
+    const t = topic || "your topic";
+    const numItems = 8, numCross = Math.round((blend/100)*numItems), numNative = numItems - numCross;
+    const myTopTitles = myVideos.slice(0,3).map(v=>v.title);
+    const compTitles = competitorVideos.slice(0,3).map(v=>v.title);
+    const nativeTpl = [
+      `I Tried ${t} for 30 Days — Here's What Broke`,
+      `The Truth About ${t} (No One in ${myNiche} Will Tell You)`,
+      `Why Everyone in ${myNiche} Is Wrong About ${t}`,
+      `${t}: Ranked Worst to Best`,
+      `I Spent 100 Hours on ${t} So You Don't Have To`,
+    ];
+    const crossTpl = [
+      `${t} — But I Did It With $0 Budget`,
+      `I Lived ${t} for 7 Days (And It Almost Broke Me)`,
+      `The ${t} Method That's Killing It in 2026`,
+      `Nobody Talks About This ${t} Loophole`,
+      `The Hidden Side of ${t} They Don't Want You to See`,
+    ];
+    const samples = [];
+    for (let i=0;i<numNative;i++) samples.push({ text:nativeTpl[i%nativeTpl.length], tag:"your-channel pattern", tagColor:"var(--accent)", source:`mirrors "${myTopTitles[i%Math.max(1,myTopTitles.length)]?.slice(0,40)||"your top video"}…"`, score:72+(i%20) });
+    for (let i=0;i<numCross;i++) samples.push({ text:crossTpl[i%crossTpl.length], tag:"borrowed pattern", tagColor:"#facc15", source:`from "${compTitles[i%Math.max(1,compTitles.length)]?.slice(0,40)||"competitor"}…"`, score:65+(i%25) });
+    setOut(samples);
+    setLoading(false);
   }
 
   function save(item) { setSavedGen(s=>[{ kind:"title", ...item, ts: Date.now() }, ...s].slice(0,50)); }
@@ -368,7 +376,7 @@ function TitleGeneratorPage({ myChannel, setMyChannel, trackers }) {
           <h1 className="page-title">Title generator</h1>
           <p className="page-sub">Title patterns from your top-performing videos blended with what's working on your competitors.</p>
         </div>
-        <div className="chip mono">5 credits per gen</div>
+        <AiBadge/>
       </div>
 
       <TrainingPanel
@@ -461,41 +469,47 @@ function ThumbGeneratorPage({ myChannel, setMyChannel, trackers }) {
 
   function removeRef(id) { setRefs(r => r.filter(x=>x.id!==id)); }
 
-  function generate() {
+  async function generate() {
     setLoading(true);
-    setTimeout(()=>{
-      const t = topic || "your topic";
-      const numItems = 6;
-      const numCross = Math.round((blend/100) * numItems);
-      const numNative = numItems - numCross;
-      const refSummary = refs.length ? ` • Using ${refs.length} ref${refs.length>1?"s":""} (${[...new Set(refs.map(r=>r.kind))].join(", ")})` : "";
-      const native = [
-        { text: `Big yellow "${t.split(" ")[0]?.toUpperCase()||"WHY"}!" tag · shocked face · red circle on the result`, tag: "your-niche recipe", tagColor: "var(--accent)" },
-        { text: `Split frame: before / after · arrow · price tag overlay`, tag: "your-niche recipe", tagColor: "var(--accent)" },
-        { text: `Numeric overlay (count) · centered subject · darkened background`, tag: "your-niche recipe", tagColor: "var(--accent)" },
-        { text: `Hand-drawn arrow + circled object · raw warm tones`, tag: "your-niche recipe", tagColor: "var(--accent)" },
-      ];
-      const cross = [
-        { text: `Whisper format from Horror: black bg, lowercase italic title, single eye in frame — applied to "${t}"`, tag: "borrowed from Horror", tagColor: "#facc15" },
-        { text: `Tier list from Gaming: S-A-B-C-D ranks with thumbnail subjects sorted — applied to ${t}`, tag: "borrowed from Gaming", tagColor: "#facc15" },
-        { text: `Mini-doc cold open from Education: letterboxed 2.39:1, serif title — applied to ${t}`, tag: "borrowed from Education", tagColor: "#facc15" },
-      ];
-      const samples = [];
-      for (let i=0;i<numNative;i++) {
-        const useFace = refs.find(r=>r.kind==="face");
-        const useChar = refs.find(r=>r.kind==="character");
-        const useInsp = refs.find(r=>r.kind==="inspiration");
-        samples.push({
-          ...native[i%native.length],
-          source: `seen in @${trackedChannels[i%Math.max(1,trackedChannels.length)] || myChannel}'s thumbnails${refSummary}`,
-          refUsed: useFace || useChar || useInsp,
-          refTreatment: useFace ? "face-swapped from your upload" : useChar ? "character ref applied" : useInsp ? "color/style lifted from inspiration" : null,
-        });
-      }
-      for (let i=0;i<numCross;i++) samples.push({ ...cross[i%cross.length], source: "cross-niche transfer" + refSummary });
-      setOut(samples);
-      setLoading(false);
-    }, 700);
+    // Try Gemini first
+    if (window.TubeAPI?.Keys?.hasGemini()) {
+      try {
+        const result = await window.TubeAPI.generateThumbnailConcepts({ niche: myNiche, topic, count: 6, blend, competitorVideos, refs });
+        if (result && Array.isArray(result) && result.length) {
+          const useFace = refs.find(r=>r.kind==="face");
+          const useChar = refs.find(r=>r.kind==="character");
+          const useInsp = refs.find(r=>r.kind==="inspiration");
+          const enriched = result.map(item => ({
+            ...item,
+            refUsed: useFace || useChar || useInsp,
+            refTreatment: useFace ? "face-swapped from your upload" : useChar ? "character ref applied" : useInsp ? "color/style lifted from inspiration" : null,
+          }));
+          setOut(enriched); setLoading(false); return;
+        }
+      } catch (e) { /* fall through */ }
+    }
+    // Local fallback
+    const t = topic || "your topic";
+    const numItems = 6, numCross = Math.round((blend/100)*numItems), numNative = numItems - numCross;
+    const refSummary = refs.length ? ` • Using ${refs.length} ref${refs.length>1?"s":""} (${[...new Set(refs.map(r=>r.kind))].join(", ")})` : "";
+    const useFace = refs.find(r=>r.kind==="face");
+    const useChar = refs.find(r=>r.kind==="character");
+    const useInsp = refs.find(r=>r.kind==="inspiration");
+    const native = [
+      { text:`Big yellow "${t.split(" ")[0]?.toUpperCase()||"WHY"}!" tag · shocked face · red circle on the result`, tag:"your-niche recipe", tagColor:"var(--accent)" },
+      { text:`Split frame: before / after · arrow · price tag overlay`, tag:"your-niche recipe", tagColor:"var(--accent)" },
+      { text:`Numeric overlay (count) · centered subject · darkened background`, tag:"your-niche recipe", tagColor:"var(--accent)" },
+      { text:`Hand-drawn arrow + circled object · raw warm tones`, tag:"your-niche recipe", tagColor:"var(--accent)" },
+    ];
+    const cross = [
+      { text:`Whisper format from Horror: black bg, lowercase italic title, single eye in frame — applied to "${t}"`, tag:"borrowed from Horror", tagColor:"#facc15" },
+      { text:`Tier list from Gaming: S-A-B-C-D ranks with thumbnail subjects sorted — applied to ${t}`, tag:"borrowed from Gaming", tagColor:"#facc15" },
+      { text:`Mini-doc cold open from Education: letterboxed 2.39:1, serif title — applied to ${t}`, tag:"borrowed from Education", tagColor:"#facc15" },
+    ];
+    const samples = [];
+    for (let i=0;i<numNative;i++) samples.push({ ...native[i%native.length], source:`seen in @${trackedChannels[i%Math.max(1,trackedChannels.length)]||myChannel}'s thumbnails${refSummary}`, refUsed:useFace||useChar||useInsp, refTreatment:useFace?"face-swapped from your upload":useChar?"character ref applied":useInsp?"color/style lifted from inspiration":null });
+    for (let i=0;i<numCross;i++) samples.push({ ...cross[i%cross.length], source:"cross-niche transfer"+refSummary });
+    setOut(samples); setLoading(false);
   }
 
   function save(item) { setSavedGen(s=>[{ kind:"thumb", ...item, ts: Date.now() }, ...s].slice(0,50)); }
@@ -507,7 +521,7 @@ function ThumbGeneratorPage({ myChannel, setMyChannel, trackers }) {
           <h1 className="page-title">Thumbnail generator</h1>
           <p className="page-sub">Concepts grounded in your niche's winning recipes. Upload your face, character refs, or inspiration thumbnails to steer the output.</p>
         </div>
-        <div className="chip mono">5 credits per gen</div>
+        <AiBadge/>
       </div>
 
       <TrainingPanel

@@ -80,9 +80,52 @@ function Avatar({ handle, size }) {
 }
 window.Avatar = Avatar;
 
-// Synthetic thumbnail — varies by thumbStyle
+// Loading spinner
+function Spinner({ size = 24, color = "var(--accent)" }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" style={{ animation: "spin 0.7s linear infinite" }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <circle cx="12" cy="12" r="9" fill="none" stroke={color} strokeWidth="2.5"
+        strokeDasharray="28 57" strokeLinecap="round"/>
+    </svg>
+  );
+}
+window.Spinner = Spinner;
+
+// Skeleton shimmer block
+function Skeleton({ w = "100%", h = 16, radius = 6, style: extra }) {
+  return (
+    <div style={{
+      width: w, height: h, borderRadius: radius,
+      background: "linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%)",
+      backgroundSize: "200% 100%",
+      animation: "shimmer 1.4s infinite",
+      ...extra,
+    }}/>
+  );
+}
+window.Skeleton = Skeleton;
+
+// Synthetic thumbnail — varies by thumbStyle; shows real image if video.thumbnail exists
 function Thumb({ video, big }) {
-  const [c1, c2] = video.colors;
+  const [imgErr, setImgErr] = useState(false);
+
+  // Real YouTube thumbnail
+  if (video.thumbnail && !imgErr) {
+    return (
+      <div className="card-thumb-inner" style={{ background: "#000", overflow: "hidden" }}>
+        <img
+          src={video.thumbnail}
+          alt={video.title}
+          onError={() => setImgErr(true)}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+      </div>
+    );
+  }
+
+  // Synthetic fallback
+  const [c1, c2] = video.colors || ["#5b8cff", "#1e3a8a"];
   const titleShort = video.title.split(" ").slice(0,3).join(" ");
   const styles = {
     0: { bg: `linear-gradient(135deg, ${c1}, ${c2})`, content: <div className="thumb-bigtext">{video.title.match(/\d+/)?.[0] || "WHY"}</div> },
@@ -91,7 +134,7 @@ function Thumb({ video, big }) {
     3: { bg: `linear-gradient(180deg, ${c1}, ${c2})`, content: <div className="thumb-title">{titleShort}</div> },
     4: { bg: `linear-gradient(45deg, ${c2}, ${c1})`, content: <div className="thumb-bigtext">VS</div>, circle: true },
     5: { bg: `linear-gradient(135deg, ${c1}, ${c2})`, content: <div className="thumb-title">{titleShort}</div>, tag: "NEW" },
-  }[video.thumbStyle];
+  }[video.thumbStyle || 0];
   return (
     <div className="card-thumb-inner" style={{ background: styles.bg }}>
       <div className="thumb-stripes"></div>
