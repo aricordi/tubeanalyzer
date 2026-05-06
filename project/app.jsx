@@ -228,7 +228,7 @@ function App() {
 
   // ── Filters ──
   const [filters, setFilters] = useState({
-    niche: "All", multRange: [0.5, 6], subsRange: [0, 5_000_000],
+    niche: "All", multRange: [0, 100], subsRange: [0, 100_000_000],
     lengthRange: [0, 60 * 60], ageDays: 365, sort: "recent",
   });
   const [search, setSearch] = useState("");

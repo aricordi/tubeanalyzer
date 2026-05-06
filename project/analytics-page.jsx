@@ -39,18 +39,21 @@
 
     // 401 / 403 / 4xx from analytics API — surface the real message
     if (code === 'AUTH_EXPIRED' || code === 'ANALYTICS_QUOTA' || code === 'ANALYTICS_ERR') {
-      // Check for known specific causes
+      // Most specific match first
+      if (lower.includes('insufficient permission to access this report')) {
+        return 'Your authenticated Google account doesn\'t have access to YouTube Analytics for any channel.\n\nMost common cause: your YouTube channel is on a Brand Account, but during the popup you signed in with a different Google account.\n\nFix: Click "Reconnect" below. In the Google popup, click "Use another account" and select the Google account you use to manage your YouTube channel (the same one that gives you access to studio.youtube.com). If your channel is a Brand Account, you may need to log into youtube.com first as that brand account in this browser.';
+      }
       if (lower.includes('api has not been used') || lower.includes('api is not enabled') || reason === 'accessNotConfigured') {
-        return `YouTube Analytics API is not enabled in your Google Cloud project. Go to console.cloud.google.com → APIs & Services → Library → search "YouTube Analytics API" → Enable. (Full message: ${apiMsg})`;
+        return `YouTube Analytics API is not enabled in your Google Cloud project. Go to console.cloud.google.com → APIs & Services → Library → search "YouTube Analytics API" → Enable. Then disconnect and reconnect here. (${apiMsg})`;
       }
-      if (lower.includes('forbidden') || lower.includes('does not have permission') || reason === 'forbidden') {
-        return `Access denied. Most common cause: your Google account doesn't own a YouTube channel that has data, OR the channel hasn't generated views yet. (${apiMsg})`;
+      if (lower.includes('forbidden') || reason === 'forbidden') {
+        return `Access denied: ${apiMsg}. This usually means your channel has no analytics data yet (need at least a few views), or the wrong Google account was selected. Click Reconnect to try a different account.`;
       }
-      if (lower.includes('insufficient') || lower.includes('scope')) {
-        return `Insufficient OAuth scope. Try clicking Reconnect and grant the YouTube Analytics permission. (${apiMsg})`;
+      if (lower.includes('insufficient') && lower.includes('scope')) {
+        return `Insufficient OAuth scope: ${apiMsg}. Click Reconnect and make sure you check the YouTube Analytics permission in the consent screen.`;
       }
       if (code === 'AUTH_EXPIRED') {
-        return `Authorization rejected (HTTP 401): "${apiMsg}". This usually means: 1) the OAuth Client ID's project doesn't match where YouTube Analytics API is enabled, OR 2) the Client ID type isn't "Web application". Click Reconnect to retry.`;
+        return `Authorization rejected (HTTP 401): "${apiMsg}". Possible causes: 1) Your OAuth Client ID's Google Cloud project doesn't match where YouTube Analytics API is enabled, 2) The Client ID type isn't "Web application", 3) The Google account you signed in with doesn't manage a YouTube channel. Click Reconnect to retry.`;
       }
       return `Analytics API error: ${apiMsg}`;
     }
@@ -629,14 +632,15 @@
       <div className="page" style={{ overflowY: 'auto' }}>
         {err && (
           <div style={{
-            maxWidth: 900, margin: '0 auto', padding: '12px 16px',
+            maxWidth: 900, margin: '12px auto', padding: '14px 18px',
             background: 'var(--hot-3)22', color: 'var(--hot-3)', fontSize: 13,
-            display: 'flex', alignItems: 'center', gap: 12, borderRadius: 8,
+            display: 'flex', alignItems: 'flex-start', gap: 12, borderRadius: 8,
+            border: '1px solid var(--hot-3)44',
           }}>
-            <span style={{ flex: 1 }}>{err}</span>
+            <span style={{ flex: 1, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{err}</span>
             <button onClick={() => { handleDisconnect(); }}
-              style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 6, border: '1px solid var(--hot-3)66',
-                background: 'transparent', color: 'var(--hot-3)', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+              style={{ flexShrink: 0, padding: '6px 14px', borderRadius: 6, border: '1px solid var(--hot-3)66',
+                background: 'var(--hot-3)11', color: 'var(--hot-3)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
               Reconnect
             </button>
           </div>

@@ -81,7 +81,10 @@
           },
         });
 
-        client.requestAccessToken({ prompt: forceConsent ? 'consent' : '' });
+        // 'select_account consent' forces both account picker + consent screen,
+        // so the user can switch to a different Google account if their first
+        // attempt was on a Google account that doesn't own the YouTube channel.
+        client.requestAccessToken({ prompt: forceConsent ? 'select_account consent' : '' });
       });
     },
 

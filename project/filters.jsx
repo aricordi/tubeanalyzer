@@ -35,19 +35,19 @@ function FilterBar({ filters, setFilters, niches }) {
   const f = filters;
   function set(k, v) { setFilters({ ...f, [k]: v }); }
   function clear() {
-    setFilters({ niche:"All", multRange:[0.5,6], subsRange:[0,5_000_000], lengthRange:[0, 60*60], ageDays: 365, sort: "recent" });
+    setFilters({ niche:"All", multRange:[0,100], subsRange:[0,100_000_000], lengthRange:[0, 60*60], ageDays: 365, sort: "recent" });
   }
   const activeCount =
     (f.niche!=="All"?1:0) +
-    (f.multRange[0]>0.5||f.multRange[1]<6?1:0) +
-    (f.subsRange[0]>0||f.subsRange[1]<5_000_000?1:0) +
+    (f.multRange[0]>0||f.multRange[1]<100?1:0) +
+    (f.subsRange[0]>0||f.subsRange[1]<100_000_000?1:0) +
     (f.lengthRange[0]>0||f.lengthRange[1]<60*60?1:0) +
     (f.ageDays<365?1:0);
   return (
     <div>
       <div className="filterbar">
         <button className={classNames("chip","chip-accent", f.multRange[0]>=2.5 && "active")}
-          onClick={()=>set("multRange", f.multRange[0]>=2.5?[0.5,6]:[2.5,6])}>
+          onClick={()=>set("multRange", f.multRange[0]>=2.5?[0,100]:[2.5,100])}>
           🔥 Hot outliers
         </button>
         <button className={classNames("chip", f.ageDays<=7 && "active")} onClick={()=>set("ageDays", f.ageDays<=7?365:7)}>Last week</button>
@@ -77,11 +77,11 @@ function FilterBar({ filters, setFilters, niches }) {
         <div className="advanced-panel">
           <div>
             <div className="adv-label">Outlier multiplier</div>
-            <RangeSlider min={0.5} max={6} step={0.1} value={f.multRange} onChange={(v)=>set("multRange",v)} format={(v)=>v.toFixed(1)+"x"}/>
+            <RangeSlider min={0} max={100} step={0.5} value={f.multRange} onChange={(v)=>set("multRange",v)} format={(v)=>v.toFixed(1)+"x"}/>
           </div>
           <div>
             <div className="adv-label">Channel subscribers</div>
-            <RangeSlider min={0} max={5_000_000} step={10_000} value={f.subsRange} onChange={(v)=>set("subsRange",v)} format={(v)=>fmtNum(v)}/>
+            <RangeSlider min={0} max={100_000_000} step={100_000} value={f.subsRange} onChange={(v)=>set("subsRange",v)} format={(v)=>fmtNum(v)}/>
           </div>
           <div>
             <div className="adv-label">Video length (sec)</div>

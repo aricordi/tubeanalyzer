@@ -23,6 +23,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.send_header("Access-Control-Allow-Origin", "*")
+        # Allow Google Identity Services popup to communicate with the parent.
+        # Without this, browsers print COOP warnings on every OAuth popup tick.
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
         super().end_headers()
 
     def log_message(self, fmt, *args):
