@@ -4,7 +4,7 @@
   'use strict';
 
   const YT_BASE  = 'https://www.googleapis.com/youtube/v3';
-  const GM_BASE  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+  const GM_BASE  = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
   // ─── Cache (localStorage with TTL) ────────────────────────────────────────
   const CACHE_1H  = 60 * 60 * 1000;
