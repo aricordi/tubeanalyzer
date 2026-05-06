@@ -98,18 +98,20 @@
   }
 
   // ─── Get authenticated user's channel ─────────────────────────────────────
+  // Returns null on any error — not fatal, dashboard works without it.
   async function getMyChannel() {
-    if (!AnalyticsAuth.isConnected) throw Object.assign(new Error('Not connected'), { code: 'NOT_CONNECTED' });
-    const res = await fetch(
-      `${YT_BASE}/channels?part=snippet,statistics,brandingSettings&mine=true`,
-      { headers: { Authorization: `Bearer ${AnalyticsAuth.accessToken}` } }
-    );
-    if (!res.ok) {
-      if (res.status === 401) throw Object.assign(new Error('Session expired'), { code: 'AUTH_EXPIRED' });
-      throw new Error(`HTTP ${res.status}`);
+    if (!AnalyticsAuth.isConnected) return null;
+    try {
+      const res = await fetch(
+        `${YT_BASE}/channels?part=snippet,statistics,brandingSettings&mine=true`,
+        { headers: { Authorization: `Bearer ${AnalyticsAuth.accessToken}` } }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.items?.[0] || null;
+    } catch {
+      return null;
     }
-    const data = await res.json();
-    return data.items?.[0] || null;
   }
 
   // ─── Channel overview (daily breakdown) ───────────────────────────────────

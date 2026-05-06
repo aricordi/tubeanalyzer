@@ -311,6 +311,7 @@ function App() {
 
   if (route.page === "home") {
     body = <window.HomePage
+      key={hasKeys.yt ? 'live' : 'demo'}
       filters={filters} setFilters={setFilters} search={search}
       onOpenVideo={openVideo} onOpenChannel={openChannel}
       bookmarks={bookmarks} toggleBookmark={toggleBookmark}

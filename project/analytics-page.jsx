@@ -28,13 +28,15 @@
   function analyticsError(e) {
     const code = e?.code || '';
     const msg  = (e?.message || String(e)).toLowerCase();
-    if (code === 'NO_CLIENT_ID')  return 'No OAuth Client ID — enter your Client ID below.';
-    if (code === 'GIS_NOT_READY') return 'Google sign-in is still loading. Wait a moment and try again.';
-    if (code === 'OAUTH_ERR')     return e.message || 'OAuth authorization failed — check your Client ID and try again.';
-    if (code === 'AUTH_EXPIRED')  return 'Session expired — click Reconnect.';
-    if (code === 'NOT_CONNECTED') return 'Not connected. Click Connect to authorize.';
-    if (msg.includes('popup'))    return 'Pop-up blocked — allow pop-ups for localhost then retry.';
-    if (msg.includes('access_denied')) return 'Access denied — you cancelled the authorization or this account has no YouTube channel.';
+    if (code === 'NO_CLIENT_ID')       return 'No OAuth Client ID — enter your Client ID below.';
+    if (code === 'GIS_NOT_READY')      return 'Google sign-in is still loading. Wait a moment and try again.';
+    if (code === 'OAUTH_ERR')          return e.message || 'OAuth failed — check that your Client ID is "Web application" type and http://localhost:8765 is an authorized JavaScript origin.';
+    if (code === 'AUTH_EXPIRED')       return 'Analytics access expired — click Reconnect below.';
+    if (code === 'NOT_CONNECTED')      return 'Not connected to YouTube Analytics.';
+    if (code === 'ANALYTICS_ERR')      return `Analytics API error: ${e.message} — make sure "YouTube Analytics API" is enabled in your Google Cloud project.`;
+    if (code === 'ANALYTICS_QUOTA')    return `Access denied: ${e.message} — check that your Google account owns a YouTube channel, and YouTube Analytics API is enabled.`;
+    if (msg.includes('popup'))         return 'Pop-up blocked — allow pop-ups for localhost:8765 in your browser, then retry.';
+    if (msg.includes('access_denied')) return 'Access denied — you may have cancelled, or this Google account has no YouTube channel.';
     return e?.message || String(e);
   }
 
@@ -511,20 +513,23 @@
       setLoading(true);
       setErr('');
       try {
-        const [ch, ov, tv, tf, co] = await Promise.all([
-          window.TubeAnalytics.getMyChannel(),
+        // Core analytics — these are the real data calls
+        const [ov, tv, tf, co] = await Promise.all([
           window.TubeAnalytics.getChannelOverview(d),
           window.TubeAnalytics.getTopVideos(d),
           window.TubeAnalytics.getTrafficSources(d),
           window.TubeAnalytics.getTopCountries(d),
         ]);
 
-        setChannel(ch);
         setOverview(ov);
         setTraffic(tf);
         setCountries(co);
 
-        // Enrich top video titles if we have a YT API key
+        // Channel info — non-fatal, works if youtube.readonly scope was granted
+        const ch = await window.TubeAnalytics.getMyChannel();
+        setChannel(ch);
+
+        // Enrich top video titles if we have a YT Data API key
         if (tv.length && window.TubeAPI?.Keys.hasYt()) {
           try {
             const details = await window.TubeAPI.getVideoDetails(tv.map(v => v.videoId));
@@ -542,10 +547,8 @@
           setTopVideos(tv);
         }
       } catch (e) {
-        if (e.code === 'AUTH_EXPIRED' || e.code === 'NOT_CONNECTED') {
-          setConnected(false);
-          window.TubeAnalytics.AnalyticsAuth.disconnect();
-        }
+        // AUTH_EXPIRED from the analytics calls means token is genuinely dead
+        // Show reconnect button but don't auto-disconnect (let user decide)
         setErr(analyticsError(e));
       } finally {
         setLoading(false);
@@ -592,10 +595,16 @@
       <div className="page" style={{ overflowY: 'auto' }}>
         {err && (
           <div style={{
-            maxWidth: 900, margin: '0 auto 0', padding: '10px 16px',
+            maxWidth: 900, margin: '0 auto', padding: '12px 16px',
             background: 'var(--hot-3)22', color: 'var(--hot-3)', fontSize: 13,
+            display: 'flex', alignItems: 'center', gap: 12, borderRadius: 8,
           }}>
-            {err}
+            <span style={{ flex: 1 }}>{err}</span>
+            <button onClick={() => { handleDisconnect(); }}
+              style={{ flexShrink: 0, padding: '5px 12px', borderRadius: 6, border: '1px solid var(--hot-3)66',
+                background: 'transparent', color: 'var(--hot-3)', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+              Reconnect
+            </button>
           </div>
         )}
         <Dashboard
