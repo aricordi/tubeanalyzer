@@ -50,6 +50,14 @@ function FilterBar({ filters, setFilters, niches }) {
           onClick={()=>set("multRange", f.multRange[0]>=2.5?[0,100]:[2.5,100])}>
           🔥 Hot outliers
         </button>
+        <button className={classNames("chip", f.lengthRange[1]<=60 && "active")}
+          onClick={()=>set("lengthRange", f.lengthRange[1]<=60 ? [0, 60*60] : [0, 60])}>
+          📐 Shorts only
+        </button>
+        <button className={classNames("chip", f.lengthRange[0]>=61 && "active")}
+          onClick={()=>set("lengthRange", f.lengthRange[0]>=61 ? [0, 60*60] : [61, 60*60])}>
+          🎬 Long-form only
+        </button>
         <button className={classNames("chip", f.ageDays<=7 && "active")} onClick={()=>set("ageDays", f.ageDays<=7?365:7)}>Last week</button>
         <button className={classNames("chip", f.ageDays<=30 && f.ageDays>7 && "active")} onClick={()=>set("ageDays", 30)}>Last month</button>
         <div className="filter-divider"></div>
@@ -109,7 +117,7 @@ function applyFilters(videos, f, search) {
     if (f.niche!=="All" && v.niche !== f.niche) return false;
     if (v.multiplier < f.multRange[0] || v.multiplier > f.multRange[1]) return false;
     if (v.subs < f.subsRange[0] || v.subs > f.subsRange[1]) return false;
-    const ls = window.lengthSec(v.length);
+    const ls = v.lengthSec != null ? v.lengthSec : window.lengthSec(v.length);
     if (ls < f.lengthRange[0] || ls > f.lengthRange[1]) return false;
     if (window.agoDays(v.ago) > f.ageDays) return false;
     if (search) {

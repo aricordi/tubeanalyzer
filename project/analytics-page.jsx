@@ -152,6 +152,17 @@
     const [err, setErr] = useState('');
     const [showKey, setShowKey] = useState(false);
 
+    // After OAuth, may need to pick a channel
+    const [phase, setPhase] = useState('initial'); // 'initial' | 'pick' | 'manual'
+    const [channelOptions, setChannelOptions] = useState([]);
+    const [manualHandle, setManualHandle] = useState('');
+    const [resolving, setResolving] = useState(false);
+
+    const finishWithChannel = useCallback((channelId) => {
+      window.TubeAnalytics.AnalyticsAuth.setSelectedChannelId(channelId);
+      onConnected();
+    }, [onConnected]);
+
     const connect = useCallback(async () => {
       setConnecting(true);
       setErr('');
@@ -159,7 +170,7 @@
         if (clientId) window.TubeAnalytics.AnalyticsAuth.setClientId(clientId);
         await window.TubeAnalytics.AnalyticsAuth.connect();
 
-        // Verify the token actually got the scopes we need before proceeding
+        // Verify scopes
         const diag = await window.TubeAnalytics.diagnoseToken();
         if (!diag.ok) {
           setErr(`Token verification failed: ${diag.reason}. Check that your Client ID is correct and is "Web application" type.`);
@@ -171,13 +182,147 @@
           window.TubeAnalytics.AnalyticsAuth.disconnect();
           return;
         }
-        onConnected();
+
+        // Fetch the user's accessible channels via the Data API
+        const channels = await window.TubeAnalytics.fetchMyChannels();
+        console.log('[TubeAnalyzer] mine=true returned channels:', channels.length, channels.map(c => c.snippet?.title));
+
+        if (channels.length === 1) {
+          // Single channel — auto-select
+          finishWithChannel(channels[0].id);
+        } else if (channels.length > 1) {
+          // Multiple channels — let user pick
+          setChannelOptions(channels);
+          setPhase('pick');
+        } else {
+          // None returned (common with brand accounts) — manual fallback
+          setErr('Couldn\'t auto-detect your channel. This is normal for Brand Accounts. Enter your channel handle below to continue.');
+          setPhase('manual');
+        }
       } catch (e) {
         setErr(analyticsError(e));
       } finally {
         setConnecting(false);
       }
-    }, [clientId, onConnected]);
+    }, [clientId, finishWithChannel]);
+
+    const resolveHandle = useCallback(async () => {
+      setResolving(true);
+      setErr('');
+      try {
+        const ch = await window.TubeAnalytics.lookupChannelByHandle(manualHandle);
+        if (!ch) {
+          setErr(`Couldn't find a channel for "${manualHandle}". Try the channel ID (starts with UC...) or the @handle from your YouTube URL.`);
+          return;
+        }
+        finishWithChannel(ch.id);
+      } catch (e) {
+        setErr(`Lookup failed: ${e.message}`);
+      } finally {
+        setResolving(false);
+      }
+    }, [manualHandle, finishWithChannel]);
+
+    // ─── Channel picker phase ─────────────────────────────────────────────
+    if (phase === 'pick') {
+      return (
+        <div style={{ maxWidth: 560, margin: '0 auto', padding: '40px 24px' }}>
+          <div style={{ textAlign: 'center', marginBottom: 24 }}>
+            <div style={{ fontSize: 40, marginBottom: 10 }}>👥</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Pick a channel</h2>
+            <p style={{ color: 'var(--fg-mute)', marginTop: 8, fontSize: 14 }}>
+              Your account has access to multiple YouTube channels. Pick the one to view analytics for.
+            </p>
+          </div>
+          {channelOptions.map(ch => (
+            <button key={ch.id} onClick={() => finishWithChannel(ch.id)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 14, width: '100%',
+                padding: 14, marginBottom: 10, borderRadius: 12,
+                background: 'var(--bg-1)', border: '1px solid var(--line)',
+                cursor: 'pointer', textAlign: 'left',
+              }}>
+              {ch.snippet?.thumbnails?.default?.url && (
+                <img src={ch.snippet.thumbnails.default.url} alt=""
+                  style={{ width: 40, height: 40, borderRadius: '50%' }}/>
+              )}
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{ch.snippet?.title}</div>
+                <div style={{ fontSize: 12, color: 'var(--fg-mute)' }}>
+                  {fmtN(+ch.statistics?.subscriberCount)} subs · {fmtN(+ch.statistics?.videoCount)} videos
+                </div>
+              </div>
+              <span style={{ color: 'var(--accent)', fontSize: 18 }}>→</span>
+            </button>
+          ))}
+          <button onClick={() => { setPhase('manual'); setChannelOptions([]); }}
+            style={{
+              width: '100%', padding: 12, marginTop: 8, borderRadius: 8,
+              background: 'transparent', border: '1px solid var(--line)',
+              color: 'var(--fg-mute)', fontSize: 13, cursor: 'pointer',
+            }}>
+            Don't see your channel? Enter handle manually →
+          </button>
+        </div>
+      );
+    }
+
+    // ─── Manual handle entry phase ────────────────────────────────────────
+    if (phase === 'manual') {
+      return (
+        <div style={{ maxWidth: 560, margin: '0 auto', padding: '40px 24px' }}>
+          <div style={{ textAlign: 'center', marginBottom: 24 }}>
+            <div style={{ fontSize: 40, marginBottom: 10 }}>🔍</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Enter your channel</h2>
+            <p style={{ color: 'var(--fg-mute)', marginTop: 8, fontSize: 14, lineHeight: 1.6 }}>
+              Type your YouTube handle (e.g. <code style={{ background: 'var(--bg-2)', padding: '2px 6px', borderRadius: 4 }}>@yourhandle</code>) or
+              channel ID (starts with UC...). You can find this in your YouTube URL.
+            </p>
+          </div>
+          {err && (
+            <div style={{
+              padding: '10px 14px', borderRadius: 8, marginBottom: 14,
+              background: 'var(--hot-3)22', color: 'var(--hot-3)', fontSize: 13,
+            }}>
+              {err}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              autoFocus
+              value={manualHandle}
+              onChange={e => setManualHandle(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') resolveHandle(); }}
+              placeholder="@yourhandle or UCxxxxx..."
+              style={{
+                flex: 1, padding: '12px 14px', borderRadius: 10,
+                background: 'var(--bg)', border: '1px solid var(--line)',
+                color: 'var(--fg)', fontSize: 14, fontFamily: 'var(--font-mono)',
+                outline: 'none',
+              }}
+            />
+            <button onClick={resolveHandle} disabled={resolving || !manualHandle.trim()}
+              style={{
+                padding: '12px 20px', borderRadius: 10, border: 'none',
+                background: 'var(--accent)', color: 'var(--accent-ink)',
+                fontWeight: 700, fontSize: 14,
+                cursor: resolving || !manualHandle.trim() ? 'default' : 'pointer',
+                opacity: resolving || !manualHandle.trim() ? 0.5 : 1,
+              }}>
+              {resolving ? '…' : 'Continue'}
+            </button>
+          </div>
+          <button onClick={() => { setPhase('initial'); setErr(''); }}
+            style={{
+              marginTop: 16, padding: '8px 14px', borderRadius: 8,
+              background: 'transparent', border: '1px solid var(--line)',
+              color: 'var(--fg-mute)', fontSize: 12, cursor: 'pointer',
+            }}>
+            ← Back
+          </button>
+        </div>
+      );
+    }
 
     return (
       <div style={{ maxWidth: 640, margin: '0 auto', padding: '32px 24px' }}>
@@ -603,6 +748,7 @@
 
     function handleDisconnect() {
       window.TubeAnalytics.AnalyticsAuth.disconnect();
+      window.TubeAnalytics.AnalyticsAuth.setSelectedChannelId('');
       setConnected(false);
       setOverview(null);
       setTopVideos([]);

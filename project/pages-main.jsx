@@ -74,13 +74,20 @@ function HomePage({ filters, setFilters, search, onOpenVideo, onOpenChannel, boo
       return;
     }
     const id = ++fetchRef.current;
-    const query = q || 'youtube viral tutorial';
-    console.log('[TubeAnalyzer] Fetching:', query);
+    const query = (q || '').trim();
     setLoading(true); setApiError('');
-    window.TubeAPI.fetchOutlierFeed(query, { maxResults: 50 })
+
+    // No query → use trending (mostPopular) — 1 quota unit instead of 100
+    const fetchPromise = query
+      ? window.TubeAPI.fetchOutlierFeed(query, { maxResults: 50 })
+      : window.TubeAPI.fetchTrendingFeed({ maxResults: 50 });
+    const label = query || '(trending)';
+    console.log('[TubeAnalyzer] Fetching:', label);
+
+    fetchPromise
       .then(videos => {
         if (fetchRef.current !== id) return;
-        console.log('[TubeAnalyzer] Got', videos?.length || 0, 'videos for:', query);
+        console.log('[TubeAnalyzer] Got', videos?.length || 0, 'videos for:', label);
         setApiVideos(videos); setLoading(false);
       })
       .catch(err => {

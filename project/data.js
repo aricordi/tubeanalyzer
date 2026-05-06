@@ -94,7 +94,12 @@ function lengthFor(seed) {
   const m = Math.floor(totalSec/60), s = totalSec%60;
   return `${m}:${s.toString().padStart(2,"0")}`;
 }
-function lengthSec(s) { const [m,sc]=s.split(":").map(Number); return m*60+sc; }
+function lengthSec(s) {
+  const parts = String(s || "0:00").split(":").map(Number);
+  if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
+  if (parts.length === 2) return parts[0]*60 + parts[1];
+  return parts[0] || 0;
+}
 function agoDays(s) {
   const m=s.match(/^(\d+)(d|w|mo|y)/); if (!m) return 30;
   const n=+m[1]; return n*({d:1,w:7,mo:30,y:365}[m[2]]);

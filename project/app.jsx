@@ -106,6 +106,22 @@ function Sidebar({ route, navigate, myChannel, hasKeys }) {
 /* ── TopBar ── */
 function TopBar({ search, setSearch, onSearchSelect, navigate, videoMap }) {
   const [focused, setFocused] = useState(false);
+  const [ytSuggestions, setYtSuggestions] = useState([]);
+  const suggestRef = useRef(0);
+
+  // YouTube search-suggestions autocomplete (debounced)
+  useEffect(() => {
+    if (!search || search.length < 2) { setYtSuggestions([]); return; }
+    const id = ++suggestRef.current;
+    const timer = setTimeout(async () => {
+      try {
+        const sugs = await (window.TubeAPI?.searchSuggestions?.(search) || Promise.resolve([]));
+        if (suggestRef.current === id) setYtSuggestions(sugs);
+      } catch { /* ignore */ }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   const results = useMemo(() => {
     if (!search) return null;
     const s = search.toLowerCase();
@@ -117,7 +133,10 @@ function TopBar({ search, setSearch, onSearchSelect, navigate, videoMap }) {
     return { channels, videos, niches };
   }, [search, videoMap]);
 
-  const showResults = focused && search && results && (results.channels.length || results.videos.length || results.niches.length);
+  const showResults = focused && search && (
+    ytSuggestions.length > 0 ||
+    (results && (results.channels.length || results.videos.length || results.niches.length))
+  );
 
   return (
     <div className="topbar">
@@ -133,23 +152,31 @@ function TopBar({ search, setSearch, onSearchSelect, navigate, videoMap }) {
         {search && <button onClick={() => setSearch("")} style={{ color: "var(--fg-dim)", padding: 4 }}><Icons.X size={14}/></button>}
         <span className="kbd mono">⌘K</span>
         {showResults && (
-          <div style={{ position: "absolute", left: 0, right: 0, top: "calc(100% + 6px)", background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 12, padding: 6, maxHeight: 420, overflowY: "auto", zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
-            {results.channels.length > 0 && <div className="nav-section" style={{ padding: "6px 10px" }}>Channels</div>}
-            {results.channels.map(c => (
+          <div style={{ position: "absolute", left: 0, right: 0, top: "calc(100% + 6px)", background: "var(--bg-1)", border: "1px solid var(--line)", borderRadius: 12, padding: 6, maxHeight: 480, overflowY: "auto", zIndex: 30, boxShadow: "0 12px 40px rgba(0,0,0,.5)" }}>
+            {ytSuggestions.length > 0 && <div className="nav-section" style={{ padding: "6px 10px" }}>YouTube suggestions</div>}
+            {ytSuggestions.map(s => (
+              <button key={s} className="nav-item" onClick={() => { setSearch(s); setFocused(false); }}>
+                <Icons.Search size={14} style={{ color: "var(--fg-dim)" }}/>
+                <span style={{ flex: 1, textAlign: "left" }}>{s}</span>
+                <span style={{ fontSize: 10, color: "var(--fg-dim)" }}>↵</span>
+              </button>
+            ))}
+            {results && results.channels.length > 0 && <div className="nav-section" style={{ padding: "6px 10px" }}>Channels</div>}
+            {results && results.channels.map(c => (
               <button key={c.handle} className="nav-item" onClick={() => onSearchSelect({ type: "channel", id: c.handle })}>
                 <Avatar handle={c.handle}/>
                 <span style={{ flex: 1, textAlign: "left" }}>@{c.handle} <span style={{ color: "var(--fg-dim)" }}>· {fmtNum(c.subs)}</span></span>
               </button>
             ))}
-            {results.niches.length > 0 && <div className="nav-section" style={{ padding: "6px 10px" }}>Niches</div>}
-            {results.niches.map(n => (
+            {results && results.niches.length > 0 && <div className="nav-section" style={{ padding: "6px 10px" }}>Niches</div>}
+            {results && results.niches.map(n => (
               <button key={n} className="nav-item" onClick={() => onSearchSelect({ type: "niche", id: n })}>
                 <Icons.Compass size={14} style={{ color: "var(--accent)" }}/>
                 <span style={{ flex: 1, textAlign: "left" }}>{n}</span>
               </button>
             ))}
-            {results.videos.length > 0 && <div className="nav-section" style={{ padding: "6px 10px" }}>Videos</div>}
-            {results.videos.map(v => (
+            {results && results.videos.length > 0 && <div className="nav-section" style={{ padding: "6px 10px" }}>Videos</div>}
+            {results && results.videos.map(v => (
               <button key={v.id} className="nav-item" onClick={() => onSearchSelect({ type: "video", v })}>
                 <div style={{ width: 60, height: 34, borderRadius: 6, background: "var(--bg-2)", overflow: "hidden", position: "relative", flex: "0 0 60px" }}>
                   <Thumb video={v}/>

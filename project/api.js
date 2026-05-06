@@ -256,6 +256,70 @@
     };
   }
 
+  // ─── YouTube search suggestions (CORS-friendly endpoint) ──────────────────
+  async function searchSuggestions(query) {
+    const q = (query || '').trim();
+    if (!q) return [];
+    try {
+      // The Firefox client returns JSON: ["query", ["sug1", "sug2", ...]]
+      const res = await fetch(
+        `https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(q)}`
+      );
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data?.[1]) ? data[1].slice(0, 8) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  // ─── High-level: fetch trending / most popular videos (1 unit) ───────────
+  async function fetchTrendingFeed({ maxResults = 50, regionCode = 'US' } = {}) {
+    const ck  = `trending:${regionCode}:${maxResults}`;
+    const hit = cget(ck);
+    if (hit) return hit;
+    if (!Keys.hasYt()) throw Object.assign(new Error('No YouTube API key configured'), { code: 'NO_KEY' });
+    const url = new URL(`${YT_BASE}/videos`);
+    url.searchParams.set('part', 'snippet,statistics,contentDetails');
+    url.searchParams.set('chart', 'mostPopular');
+    url.searchParams.set('regionCode', regionCode);
+    url.searchParams.set('maxResults', String(maxResults));
+    url.searchParams.set('key', Keys.yt);
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const msg  = body.error?.message || `HTTP ${res.status}`;
+      if (res.status === 400) throw Object.assign(new Error(msg), { code: 'BAD_KEY' });
+      if (res.status === 403) throw Object.assign(new Error(msg), { code: 'QUOTA' });
+      throw Object.assign(new Error(msg), { code: 'YT_ERR' });
+    }
+    const data = await res.json();
+    const items = data.items || [];
+
+    // Get channel stats for accurate avgViews / multiplier
+    const chanIds = [...new Set(items.map(i => i.snippet?.channelId).filter(Boolean))];
+    const chanMap = chanIds.length ? await getChannelsBatch(chanIds) : {};
+
+    const videos = items.map(item => {
+      const chanId  = item.snippet?.channelId;
+      const ch      = chanMap[chanId];
+      const subs    = parseInt(ch?.statistics?.subscriberCount || 0);
+      const totV    = parseInt(ch?.statistics?.viewCount || 0);
+      const vidCnt  = parseInt(ch?.statistics?.videoCount || 1);
+      const avgViews = vidCnt > 0 ? Math.round(totV / vidCnt) : Math.max(1000, Math.round(subs * 0.05));
+      const niche = guessNiche(item.snippet?.title || '', item.snippet?.channelTitle || '');
+      // For mostPopular endpoint, item itself has both id and detail fields
+      const synthSearchItem = { id: { videoId: item.id }, snippet: item.snippet };
+      const v = buildVideo(synthSearchItem, item, avgViews, niche);
+      v.subs        = subs;
+      v.channel     = ch?.snippet?.customUrl?.replace('@', '') || item.snippet?.channelTitle?.replace(/\s+/g, '') || chanId;
+      v.channelName = ch?.snippet?.title || item.snippet?.channelTitle || 'Unknown';
+      return v;
+    });
+    cset(ck, videos, CACHE_1H);
+    return videos;
+  }
+
   // ─── High-level: fetch outlier feed ───────────────────────────────────────
   async function fetchOutlierFeed(query, { maxResults = 20 } = {}) {
     // 1. Search (100 units)
@@ -570,6 +634,8 @@ Respond with just the video title/concept as plain text (1-2 sentences max).`;
     getChannelVideos,
     searchChannels,
     fetchOutlierFeed,
+    fetchTrendingFeed,
+    searchSuggestions,
     fetchChannelWithVideos,
 
     // Gemini

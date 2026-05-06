@@ -22,6 +22,13 @@
     get clientId()    { return localStorage.getItem('ta_oauth_client_id') || ''; },
     setClientId(v)    { localStorage.setItem('ta_oauth_client_id', v.trim()); },
 
+    // Persisted because we need it across reconnects
+    get selectedChannelId() { return localStorage.getItem('ta_analytics_channel_id') || ''; },
+    setSelectedChannelId(id) {
+      if (id) localStorage.setItem('ta_analytics_channel_id', String(id).trim());
+      else localStorage.removeItem('ta_analytics_channel_id');
+    },
+
     get accessToken() { return _accessToken; },
     get grantedScopes(){ return _grantedScopes; },
     get isConnected() { return !!(_accessToken && Date.now() < _tokenExpiry); },
@@ -125,12 +132,19 @@
   }
 
   // ─── Analytics fetch helper ────────────────────────────────────────────────
+  // Always uses the explicit selected channel ID when available — this is
+  // critical for brand-account channels where channel==MINE returns 401.
   async function analyticsRequest(params) {
     if (!AnalyticsAuth.isConnected) {
       throw Object.assign(new Error('Not connected to YouTube Analytics.'), { code: 'NOT_CONNECTED' });
     }
+    const channelId = AnalyticsAuth.selectedChannelId;
+    const finalParams = {
+      ...params,
+      ids: channelId ? `channel==${channelId}` : 'channel==MINE',
+    };
     const url = new URL(`${ANALYTICS_BASE}/reports`);
-    for (const [k, v] of Object.entries(params)) {
+    for (const [k, v] of Object.entries(finalParams)) {
       if (v != null) url.searchParams.set(k, String(v));
     }
     const res = await fetch(url.toString(), {
@@ -161,7 +175,20 @@
   // Returns null on any error — not fatal, dashboard works without it.
   async function getMyChannel() {
     if (!AnalyticsAuth.isConnected) return null;
+    const channelId = AnalyticsAuth.selectedChannelId;
     try {
+      // If we have a specific channel ID selected, fetch by that ID using
+      // the public API key (works for any channel, brand or personal).
+      if (channelId && window.TubeAPI?.Keys?.hasYt()) {
+        const res = await fetch(
+          `${YT_BASE}/channels?part=snippet,statistics,brandingSettings&id=${channelId}&key=${window.TubeAPI.Keys.yt}`
+        );
+        if (res.ok) {
+          const data = await res.json();
+          if (data.items?.[0]) return data.items[0];
+        }
+      }
+      // Fall back to mine=true with OAuth (works for personal channels)
       const res = await fetch(
         `${YT_BASE}/channels?part=snippet,statistics,brandingSettings&mine=true`,
         { headers: { Authorization: `Bearer ${AnalyticsAuth.accessToken}` } }
@@ -172,6 +199,44 @@
     } catch {
       return null;
     }
+  }
+
+  // ─── List channels the authenticated user owns/manages ────────────────────
+  async function fetchMyChannels() {
+    if (!AnalyticsAuth.isConnected) return [];
+    try {
+      const res = await fetch(
+        `${YT_BASE}/channels?part=snippet,statistics&mine=true&maxResults=50`,
+        { headers: { Authorization: `Bearer ${AnalyticsAuth.accessToken}` } }
+      );
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.items || [];
+    } catch {
+      return [];
+    }
+  }
+
+  // ─── Look up a channel by handle (e.g. @TechSlate) using the public key ──
+  // Useful when mine=true doesn't return the brand channel.
+  async function lookupChannelByHandle(handle) {
+    if (!window.TubeAPI?.Keys?.hasYt()) {
+      throw Object.assign(new Error('Add a YouTube Data API key in Settings first — it\'s needed to look up channels.'), { code: 'NO_YT_KEY' });
+    }
+    let cleaned = String(handle).trim();
+    if (cleaned.startsWith('@')) cleaned = cleaned.slice(1);
+    // Channel IDs start with UC and are 24 chars — use id= for those
+    const isId = /^UC[A-Za-z0-9_-]{22}$/.test(cleaned);
+    const param = isId ? `id=${cleaned}` : `forHandle=@${cleaned}`;
+    const res = await fetch(
+      `${YT_BASE}/channels?part=snippet,statistics&${param}&key=${window.TubeAPI.Keys.yt}`
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error?.message || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data.items?.[0] || null;
   }
 
   // ─── Channel overview (daily breakdown) ───────────────────────────────────
@@ -346,6 +411,8 @@
   window.TubeAnalytics = {
     AnalyticsAuth,
     diagnoseToken,
+    fetchMyChannels,
+    lookupChannelByHandle,
     getMyChannel,
     getChannelOverview,
     getTopVideos,
