@@ -28,6 +28,9 @@ const NAV = [
     { id: "compare",           label: "Compare videos",    icon: "Eye" },
     { id: "thumb-mockup",      label: "Thumbnail mockup",  icon: "Image" },
   ]},
+  { section: "My Channel", items: [
+    { id: "analytics", label: "My Analytics", icon: "Trend", pill: "OAuth" },
+  ]},
 ];
 
 /* ── Sidebar ── */
@@ -370,6 +373,8 @@ function App() {
     body = <window.ThumbMockupPage onOpenVideo={openVideo} bookmarks={bookmarks} trackers={trackers} myChannel={myChannel}/>;
   } else if (route.page === "settings") {
     body = <window.SettingsPage/>;
+  } else if (route.page === "analytics") {
+    body = <window.AnalyticsPage/>;
   } else {
     body = <div className="page"><div className="empty">Page not found.</div></div>;
   }

@@ -335,8 +335,9 @@
 
   /* ── Settings Page (accessed via sidebar) ──────────────────────── */
   function SettingsPage() {
-    const [ytKey, setYtKey] = useState(window.TubeAPI.Keys.getYt() || '');
-    const [gemKey, setGemKey] = useState(window.TubeAPI.Keys.getGemini() || '');
+    const [ytKey, setYtKey] = useState(window.TubeAPI.Keys.yt || '');
+    const [gemKey, setGemKey] = useState(window.TubeAPI.Keys.gemini || '');
+    const [oauthClientId, setOauthClientId] = useState(window.TubeAnalytics?.AnalyticsAuth.clientId || '');
     const [ytStatus, setYtStatus] = useState(window.TubeAPI.Keys.hasYt() ? 'ok' : 'idle');
     const [gemStatus, setGemStatus] = useState(window.TubeAPI.Keys.hasGemini() ? 'ok' : 'idle');
     const [ytErr, setYtErr] = useState('');
@@ -375,9 +376,11 @@
       else localStorage.removeItem('ta_yt_key');
       if (gemKey) window.TubeAPI.Keys.setGemini(gemKey);
       else localStorage.removeItem('ta_gem_key');
+      if (oauthClientId && window.TubeAnalytics) window.TubeAnalytics.AnalyticsAuth.setClientId(oauthClientId);
+      else if (!oauthClientId) localStorage.removeItem('ta_oauth_client_id');
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    }, [ytKey, gemKey]);
+    }, [ytKey, gemKey, oauthClientId]);
 
     const clearCache = useCallback(() => {
       window.TubeAPI.clearCache();
@@ -444,6 +447,44 @@
           docsUrl="https://aistudio.google.com/app/apikey"
           learnMoreText="Open Google AI Studio →"
         />
+
+        {/* YouTube Analytics OAuth Client ID */}
+        <div style={{
+          background: 'var(--bg-1)', border: '1px solid var(--line)',
+          borderRadius: 12, padding: 24, marginBottom: 20,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <span style={{ fontSize: 22 }}>📊</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>YouTube Analytics (OAuth)</div>
+              <div style={{ fontSize: 11, color: 'var(--fg-dim)', marginTop: 1 }}>
+                Optional — enables "My Analytics" dashboard with personal channel data
+              </div>
+            </div>
+          </div>
+          <div style={{
+            background: 'var(--bg-2)', borderRadius: 8, padding: 14,
+            marginBottom: 14, fontSize: 13, lineHeight: 1.6, color: 'var(--fg-mute)',
+          }}>
+            Requires an OAuth 2.0 Client ID from Google Cloud Console (same project as your YouTube API key).
+            Go to <strong>Credentials → Create → OAuth 2.0 Client ID</strong>, type "Web application",
+            add <code style={{ background: 'var(--bg)', padding: '1px 5px', borderRadius: 4, fontSize: 11 }}>http://localhost:8765</code> as
+            an authorized JavaScript origin. Full setup guide is on the Analytics page.
+          </div>
+          <input
+            type="password"
+            value={oauthClientId}
+            onChange={e => setOauthClientId(e.target.value)}
+            placeholder="123456789-abc….apps.googleusercontent.com"
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              background: 'var(--bg)', border: '1px solid var(--line)',
+              borderRadius: 8, padding: '10px 14px',
+              color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-mono)',
+              outline: 'none',
+            }}
+          />
+        </div>
 
         {/* save button */}
         <button
