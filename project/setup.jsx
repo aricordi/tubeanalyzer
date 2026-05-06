@@ -542,13 +542,18 @@
 
   /* ── error formatter ── */
   function friendlyError(e) {
-    const msg = e?.message || String(e);
-    if (msg.includes('NO_KEY'))     return 'No key provided. Paste your API key above.';
-    if (msg.includes('BAD_KEY'))    return 'Invalid key — check it was copied completely.';
-    if (msg.includes('QUOTA'))      return 'Daily quota exceeded. Free quota resets at midnight Pacific time.';
-    if (msg.includes('NetworkError') || msg.includes('Failed to fetch'))
+    const code = e?.code || '';
+    const msg  = (e?.message || String(e)).toLowerCase();
+    if (code === 'NO_KEY'  || msg.includes('no key'))       return 'No key provided. Paste your API key above.';
+    if (code === 'BAD_KEY' || msg.includes('api_key_invalid') || msg.includes('invalid api key'))
+      return 'Invalid key — check it was copied completely.';
+    if (code === 'NOT_ENABLED')
+      return 'Gemini API not enabled. In AI Studio, make sure the project has "Gemini API" enabled.';
+    if (code === 'QUOTA' || msg.includes('quota') || msg.includes('resource_exhausted'))
+      return 'Quota exceeded. If this is a new key: in Google AI Studio go to Settings → Billing and confirm your free tier is active. Otherwise wait a minute and retry (free limit: 15 requests/min).';
+    if (msg.includes('networkerror') || msg.includes('failed to fetch'))
       return 'Network error — check your internet connection.';
-    return msg.slice(0, 120);
+    return (e?.message || String(e)).slice(0, 160);
   }
 
   /* ── exports ── */

@@ -537,6 +537,18 @@ Respond with just the video title/concept as plain text (1-2 sentences max).`;
     return !!(data.items?.length);
   }
   async function testGemini() {
+    // First verify the key can reach the API at all (models list = read-only, no quota cost)
+    if (!Keys.hasGemini()) throw Object.assign(new Error('No key'), { code: 'NO_KEY' });
+    const probe = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${Keys.gemini}`
+    );
+    if (!probe.ok) {
+      const err = await probe.json().catch(() => ({}));
+      const msg = err.error?.message || `HTTP ${probe.status}`;
+      if (probe.status === 400) throw Object.assign(new Error(msg), { code: 'BAD_KEY' });
+      if (probe.status === 403) throw Object.assign(new Error('API not enabled — see instructions below.'), { code: 'NOT_ENABLED' });
+      throw Object.assign(new Error(msg), { code: 'AI_ERR' });
+    }
     const text = await generate('Say "ok" and nothing else.', { maxTokens: 10 });
     return text.toLowerCase().includes('ok');
   }
