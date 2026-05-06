@@ -431,6 +431,14 @@
               <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer"
                 style={{ color: 'var(--accent)' }}>Google AI Studio</a>.
               Click "Get API key" → "Create API key". Free tier: 1,500 requests/day.
+              {gemKey && gemKey.length > 10 && (
+                <span> · <a
+                  href={`https://generativelanguage.googleapis.com/v1beta/models?key=${gemKey}`}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{ color: 'var(--accent)' }}>
+                  Diagnose key →
+                </a> (opens raw API response in browser)</span>
+              )}
             </span>
           }
           docsUrl="https://aistudio.google.com/app/apikey"
